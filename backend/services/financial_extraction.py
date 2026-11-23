@@ -12,13 +12,13 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 MAX_CHARS_PER_PASSAGE = 6000
 
-MAX_PASSAGES_PER_STATEMENT = 4
+MAX_PASSAGES_PER_STATEMENT = 8
 
 MAX_BALANCE_SHEET_PASSAGES = 18
 
-MAX_RESULTS_PER_QUERY = 5
+MAX_RESULTS_PER_QUERY = 8
 
-MAX_PASSAGES_PER_QUERY = 2
+MAX_PASSAGES_PER_QUERY = 3
 
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
@@ -26,13 +26,16 @@ STATEMENT_QUERIES = {
     "income_statement": [
         "income statement revenue sales cost of revenue gross profit operating income net income",
         "statement of operations total revenues costs expenses net earnings",
+        "profit and loss net profit profit for the year earnings attributable to owners",
+        "consolidated income statement profit before tax tax expense net income",
     ],
     "balance_sheet": [
         "consolidated balance sheet total assets total liabilities total equity",
-        "total current assets total current liabilities",
+        "total current assets total current liabilities current assets current liabilities",
         "long-term debt short-term debt current portion borrowings notes payable",
-        "total stockholders equity shareholders equity",
+        "total stockholders equity shareholders equity total equity",
         "total assets total liabilities and equity",
+        "trade payables cash equivalents inventories receivables",
     ],
     "cash_flow": [
         "statement of cash flows net cash provided by operating activities",
@@ -341,11 +344,13 @@ For the balance sheet:
 
 - Do not treat total liabilities as total debt.
 
-- Use the March 31, 2026 column when the column ordering is clear.
+- Use the latest reporting period only when the date/header-to-column mapping is clear.
 
-- Look carefully at the entire balance-sheet excerpt, including its
+- If the excerpt does not make the period or column unambiguous, return null
+  rather than selecting a numeric column by position.
 
-  lower rows, before returning null for total_equity.
+- Look carefully at the entire balance-sheet excerpt, including its lower
+  rows, before returning null for total_equity.
 
 """
 
@@ -858,15 +863,12 @@ def _apply_balance_sheet_fallback(
 
 
 
-            # The statement shows December 2025 first and March 2026 second.
-
-            if len(amounts) < 2:
-
+            # A single amount is unambiguous. For comparative rows, leave the
+            # value to the period-aware model rather than guessing by position.
+            if len(amounts) != 1:
                 continue
 
-
-
-            latest_amount = amounts[-1]
+            latest_amount = amounts[0]
 
 
 
