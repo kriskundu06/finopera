@@ -16,7 +16,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 MAX_CHARS_PER_PASSAGE = 6000
 
-MAX_PASSAGES_PER_STATEMENT = 4
+MAX_PASSAGES_PER_STATEMENT = 10
 
 MAX_BALANCE_SHEET_PASSAGES = 18
 
@@ -30,6 +30,9 @@ STATEMENT_QUERIES = {
     "income_statement": [
         "income statement revenue sales cost of revenue gross profit operating income net income",
         "statement of operations total revenues costs expenses net earnings",
+        "quarterly revenue from operations total income expenses profit loss before tax net profit",
+        "revenue from operations employee benefit expenses finance costs depreciation",
+        "consolidated income statement total revenue operating profit profit after tax",
     ],
     "balance_sheet": [
         "consolidated balance sheet total assets total liabilities total equity",
