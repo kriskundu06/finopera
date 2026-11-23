@@ -170,6 +170,33 @@ def _select_statement_pages(
     return selected
 
 
+STATEMENT_TITLE_TERMS = {
+    "income_statement": (
+        "statement of consolidated profit and loss",
+        "statement of profit and loss",
+        "income statement",
+    ),
+    "balance_sheet": (
+        "statement of consolidated balance sheet",
+        "statement of balance sheet",
+    ),
+    "cash_flow": (
+        "statement of consolidated cash flows",
+        "statement of cash flows",
+        "cash flow statement",
+    ),
+}
+
+
+def _statement_title_score(text: str, statement: str) -> float:
+    """Give a strong retrieval signal to an explicit statement title."""
+    normalized = text.casefold()
+    return 30.0 if any(
+        title in normalized
+        for title in STATEMENT_TITLE_TERMS.get(statement, ())
+    ) else 0.0
+
+
 def _retrieve_statement_passages(
     document_id: str,
     filename: str | None = None,
@@ -250,6 +277,11 @@ def _retrieve_statement_passages(
                 count = text.count(term)
                 if count:
                     score += min(count, 3) * (3.0 if " " in term else 1.0)
+
+            # An explicit statement title is a much stronger signal than
+            # generic financial vocabulary elsewhere in the report.
+            score += _statement_title_score(text, statement)
+
             # Image availability is handled as a fallback after relevance
             # scoring; it must not make an unrelated page outrank a statement
             # page merely because an image was preserved.
@@ -288,9 +320,11 @@ def _retrieve_statement_passages(
         )
 
         grouped[statement] = selected
+        selected_pages = [item["page"] for item in selected]
         print(
             f"Selected {len(selected)} complete pages for {statement} "
-            f"from {len(page_passages)} document pages "
+            f"from {len(page_passages)} document pages; "
+            f"PDF pages={selected_pages} "
             f"({document_id[:12]}...)"
         )
 
@@ -561,6 +595,7 @@ DOCUMENT EXCERPTS:
         contents: list[Any] = [prompt]
         attached_image_count = 0
         attached_image_bytes = 0
+        attached_image_pages = []
 
         for source in source_map or []:
             source["image_attached"] = False
@@ -600,10 +635,12 @@ DOCUMENT EXCERPTS:
             source["image_attached"] = True
             attached_image_count += 1
             attached_image_bytes += image_size
+            attached_image_pages.append(source.get("page"))
 
         print(
             f"Attached {attached_image_count} visual page(s) "
-            f"({attached_image_bytes} bytes) for {statement}."
+            f"({attached_image_bytes} bytes) for {statement}; "
+            f"PDF pages={attached_image_pages}."
         )
 
         response = client.models.generate_content(
