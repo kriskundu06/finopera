@@ -997,6 +997,40 @@ def _apply_balance_sheet_fallback(
     )
 
 
+def _build_extraction_status(
+    financials: dict[str, Any],
+    evidence: dict[str, Any],
+    statement_errors: dict[str, str],
+) -> dict[str, Any]:
+    """Mark extraction complete only when every core field has source evidence."""
+    verified_fields = sorted(
+        field for field in NUMERIC_FIELDS
+        if financials.get(field) is not None and evidence.get(field) is not None
+    )
+    missing_fields = sorted(NUMERIC_FIELDS - set(verified_fields))
+    complete = not statement_errors and not missing_fields
+
+    if complete:
+        message = (
+            "All core financial fields were extracted with supporting evidence. "
+            "Verify material figures against the original statements."
+        )
+    else:
+        message = (
+            f"Extraction partially completed: {len(verified_fields)} of "
+            f"{len(NUMERIC_FIELDS)} core financial fields were verified. "
+            f"Missing or unverified fields: {', '.join(missing_fields) or 'none'}. "
+            "Review the original statements before relying on this analysis."
+        )
+
+    return {
+        **extraction_summary,
+        "missing_fields": missing_fields,
+        "extraction_status": "completed" if complete else "partial",
+        "message": message,
+    }
+
+
 def extract_financials(
     document_id: str,
     filename: str | None = None,
@@ -1205,36 +1239,21 @@ def extract_financials(
 
 
 
+    extraction_summary = _build_extraction_status(
+        financials, evidence, statement_errors
+    )
+
     return {
         "document_id": document_id,
         "financials": financials,
-
         "evidence": evidence,
-        "verified_fields": [
-            field for field, value in financials.items()
-            if value is not None and evidence.get(field) is not None
-        ],
-
+        "verified_fields": verified_fields,
+        "missing_fields": missing_fields,
         "currency": currency,
-
         "units": units,
-
         "reporting_period": reporting_period,
-
         "sources": unique_sources,
-        "extraction_status": "partial" if statement_errors else "completed",
+        "extraction_status": "completed" if extraction_is_complete else "partial",
         "statement_errors": statement_errors,
-
-        "message": (
-
-            (
-                "Extraction partially completed. Some statements could not be "
-                "processed; verify available figures and evidence against the PDF."
-                if statement_errors else
-                "Extraction completed. Verify figures and supporting evidence "
-                "against the original statements before relying on the analysis."
-            )
-
-        ),
-
+        "message": extraction_message,
     }
