@@ -57,7 +57,7 @@ import {
 
 const navigation = [
   { label: 'Dashboard', page: 'Overview', icon: LayoutDashboard },
-  { label: 'Documents', page: 'Overview', icon: FileText },
+  { label: 'Documents', page: 'Documents', icon: FileText },
   { label: 'AI Analyst', page: 'Ask AI', icon: Bot },
   { label: 'Financial Statements', page: 'Financial analysis', icon: ChartNoAxesCombined },
   { label: 'Settings', page: 'Settings', icon: Settings },
@@ -342,7 +342,7 @@ function App() {
 
       if (!uploadResponse.ok) throw new Error(uploadPayload.detail || `PDF upload failed (${uploadResponse.status}).`)
 
-      if (uploadPayload.ocr_required) throw new Error('This PDF contains no selectable text. OCR is not enabled for this document yet.')
+      const ocrWarning = uploadPayload.ocr_required ? ' Some image-based pages could not be read; review page coverage before relying on extracted figures.' : ''
 
       if (typeof uploadPayload.document_id !== 'string' || !uploadPayload.document_id) {
         throw new Error('The backend did not return a document ID. Please update the backend and try uploading again.')
@@ -364,7 +364,7 @@ function App() {
 
       setFinancialResult(analysisPayload)
 
-      setUploadMessage('Analysis complete. Dashboard metrics now use the uploaded report.')
+      setUploadMessage('Analysis complete. Dashboard metrics now use the uploaded report.' + ocrWarning)
 
       setActivePage('Financial analysis')
 
@@ -873,6 +873,16 @@ function App() {
 
             </section>
 
+
+          ) : activePage === 'Documents' ? (
+            <section className="mx-auto w-full max-w-4xl space-y-6">
+              <div><p className="mb-2 text-[11px] font-semibold uppercase tracking-[.16em] text-lime-300">Document workspace</p><h2 className="text-2xl font-semibold text-white sm:text-3xl">Upload and manage reports</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Upload a PDF to extract its text, index source pages, and calculate financial metrics. Each report is scoped to its content hash.</p></div>
+              <input ref={fileInputRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={(event)=>selectFile(event.target.files?.[0])}/>
+              <button type="button" onClick={()=>fileInputRef.current?.click()} onDragOver={(event)=>{event.preventDefault();setDragging(true)}} onDragLeave={()=>setDragging(false)} onDrop={(event)=>{event.preventDefault();setDragging(false);selectFile(event.dataTransfer.files?.[0])}} className={`flex min-h-[230px] w-full flex-col items-center justify-center rounded-2xl border border-dashed px-6 text-center transition ${dragging?'border-lime-300 bg-lime-300/10':'border-white/15 bg-[#0e1422] hover:border-lime-300/40'}`}><span className="rounded-2xl bg-lime-400/10 p-4 text-lime-300"><Upload size={26}/></span><span className="mt-4 text-sm font-semibold text-white">{selectedFile ? selectedFile.name : 'Drop a financial PDF here'}</span><span className="mt-2 text-xs text-slate-500">{selectedFile ? `${(selectedFile.size/1024/1024).toFixed(2)} MB · Ready to analyze` : 'Click to browse · PDF up to 20 MB'}</span></button>
+              <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-slate-500">Annual reports · Quarterly results · Investor presentations</p><button type="button" onClick={handleUpload} disabled={!selectedFile||isAnalyzing} className="inline-flex items-center gap-2 rounded-xl bg-lime-500 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-lime-400 disabled:cursor-not-allowed disabled:opacity-40">{isAnalyzing?<LoaderCircle size={16} className="animate-spin"/>:<Upload size={16}/>} {isAnalyzing?'Analyzing…':'Upload & analyze'}</button></div>
+              {(uploadError||uploadMessage)&&<div role={uploadError?'alert':'status'} className={`rounded-xl border p-4 text-xs leading-5 ${uploadError?'border-rose-400/20 bg-rose-400/[.05] text-rose-300':'border-lime-400/20 bg-lime-400/[.05] text-lime-100'}`}>{uploadError||uploadMessage}</div>}
+              {documentInfo&&<article className="rounded-2xl border border-white/[.08] bg-[#0e1422] p-5"><div className="flex items-center gap-2 text-sm font-semibold text-white"><FileText size={17} className="text-lime-300"/> Current report</div><p className="mt-3 break-all text-sm text-slate-300">{documentInfo.filename}</p><p className="mt-1 text-xs text-slate-500">{documentInfo.total_pages} pages · {documentInfo.indexed_count} indexed chunks</p><button onClick={()=>setActivePage('Financial analysis')} className="mt-4 text-xs font-medium text-lime-300 hover:text-lime-200">Open extracted statements →</button></article>}
+            </section>
           ) : activePage === 'Ask AI' ? (
 
             <section className="mx-auto flex w-full max-w-5xl flex-col gap-5">
