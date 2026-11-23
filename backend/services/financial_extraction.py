@@ -775,7 +775,10 @@ def _extract_statement(
             )
             and (
                 field not in NUMERIC_FIELDS
-                or _quote_contains_value(value, quote)
+                or (
+                    value is not None
+                    and _quote_contains_value(value, quote)
+                )
             )
         )
 
