@@ -2,10 +2,12 @@ import hashlib
 import logging
 import re
 from io import BytesIO
+from pathlib import Path
 
 import pymupdf
 import requests
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -17,6 +19,8 @@ from backend.services.vector_store import index_chunks, search_chunks
 
 
 logger = logging.getLogger(__name__)
+
+UPLOAD_DIR = Path(__file__).resolve().parent.parent / "data" / "uploads"
 
 
 app = FastAPI(
@@ -206,6 +210,13 @@ async def extract_pdf(file: UploadFile = File(...)):
             )
             indexed_count = index_chunks(chunks)
 
+            # Retain the original PDF so users can download the exact source
+            # report later. The SHA-256 filename avoids trusting upload names.
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            stored_pdf = UPLOAD_DIR / f"{document_id}.pdf"
+            if not stored_pdf.exists():
+                stored_pdf.write_bytes(pdf_bytes)
+
     except RuntimeError as exc:
         raise HTTPException(
             status_code=503,
@@ -232,6 +243,24 @@ async def extract_pdf(file: UploadFile = File(...)):
         "chunks": chunks,
         "indexed_count": indexed_count,
     }
+
+
+@app.get("/documents/{document_id}/download")
+def download_original_document(document_id: str):
+    document_id = validate_document_id(document_id)
+    pdf_path = UPLOAD_DIR / f"{document_id}.pdf"
+
+    if not pdf_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Original PDF is not available on this server. Upload the report again to enable downloading.",
+        )
+
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=f"{document_id}.pdf",
+    )
 
 
 @app.post("/search")
