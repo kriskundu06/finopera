@@ -216,8 +216,10 @@ async def extract_pdf(file: UploadFile = File(...)):
                     image_note = (
                         "[PAGE IMAGE AVAILABLE FOR VISUAL EXTRACTION. "
                         "This note is indexing metadata, not source text. "
-                        "The image contains the original page with possible "
-                        "financial statement tables, labels, periods and amounts.]"
+                        "The original image may contain an income statement, "
+                        "balance sheet, cash flow statement, revenue, net income, "
+                        "total assets, total liabilities, total equity, operating "
+                        "activities, reporting-period headers and numeric amounts.]"
                     )
                     page_text = f"{page_text}\n{image_note}".strip()
 
