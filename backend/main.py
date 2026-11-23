@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import re
 from io import BytesIO
 
@@ -13,6 +14,9 @@ from backend.services.financial_analysis import calculate_financial_metrics
 from backend.services.financial_extraction import extract_financials
 from backend.services.rag import answer_question
 from backend.services.vector_store import index_chunks, search_chunks
+
+
+logger = logging.getLogger(__name__)
 
 
 app = FastAPI(
@@ -73,6 +77,7 @@ def financial_analysis(request: FinancialAnalysisRequest):
     try:
         return calculate_financial_metrics(financials)
     except (TypeError, ValueError) as exc:
+        logger.warning("Invalid financial-analysis input: %s", exc)
         raise HTTPException(
             status_code=400,
             detail=f"Could not calculate financial metrics: {exc}",
@@ -256,16 +261,26 @@ def financial_extract_endpoint(
             filename=filename,
         )
     except requests.RequestException as exc:
-        print(f"Financial extraction HTTP error: {exc!r}")
+        logger.exception("Financial extraction dependency request failed")
         raise HTTPException(
             status_code=502,
-            detail=f"Financial extraction request failed: {exc}",
+            detail="The financial extraction provider could not be reached. Please try again.",
         ) from exc
+    except RuntimeError as exc:
+        logger.exception("Financial extraction could not complete")
+        message = str(exc)
+        status_code = 503 if "GEMINI_API_KEY is missing" in message else 502
+        detail = (
+            "Financial extraction is not configured. Add GEMINI_API_KEY to the backend environment."
+            if status_code == 503
+            else "The financial extraction provider could not complete the request. Please retry."
+        )
+        raise HTTPException(status_code=status_code, detail=detail) from exc
     except (ValueError, KeyError) as exc:
-        print(f"Financial extraction parsing error: {exc!r}")
+        logger.exception("Financial extraction response validation failed")
         raise HTTPException(
             status_code=502,
-            detail=f"Could not parse extraction response: {exc}",
+            detail="The financial extraction provider returned an invalid response.",
         ) from exc
 
 
@@ -276,10 +291,33 @@ def analyze_financial_document(
 ):
     document_id = validate_document_id(document_id)
 
-    extraction = extract_financials(
-        document_id=document_id,
-        filename=filename,
-    )
+    try:
+        extraction = extract_financials(
+            document_id=document_id,
+            filename=filename,
+        )
+    except requests.RequestException as exc:
+        logger.exception("Financial analysis dependency request failed")
+        raise HTTPException(
+            status_code=502,
+            detail="The financial extraction provider could not be reached. Please try again.",
+        ) from exc
+    except RuntimeError as exc:
+        logger.exception("Financial analysis extraction failed")
+        message = str(exc)
+        status_code = 503 if "GEMINI_API_KEY is missing" in message else 502
+        detail = (
+            "Financial extraction is not configured. Add GEMINI_API_KEY to the backend environment."
+            if status_code == 503
+            else "The financial extraction provider could not complete the request. Please retry."
+        )
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except (ValueError, KeyError) as exc:
+        logger.exception("Financial analysis extraction response was invalid")
+        raise HTTPException(
+            status_code=502,
+            detail="The financial extraction provider returned an invalid response.",
+        ) from exc
 
     if not extraction.get("sources"):
         raise HTTPException(
@@ -333,4 +371,20 @@ def ask_question_endpoint(request: AskRequest):
         raise HTTPException(
             status_code=400,
             detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        logger.exception("Document question answering failed")
+        message = str(exc)
+        status_code = 503 if "GEMINI_API_KEY is missing" in message else 502
+        detail = (
+            "AI Analyst is not configured. Add GEMINI_API_KEY to the backend environment."
+            if status_code == 503
+            else "AI Analyst could not complete the request. Please try again."
+        )
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except requests.RequestException as exc:
+        logger.exception("AI Analyst dependency request failed")
+        raise HTTPException(
+            status_code=502,
+            detail="AI Analyst could not reach its provider. Please try again.",
         ) from exc
