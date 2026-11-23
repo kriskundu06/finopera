@@ -1159,6 +1159,24 @@ function App() {
 
           </section>
 
+
+          <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+            <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
+              <h3 className="text-sm font-semibold text-white">Balance sheet composition</h3>
+              <p className="mt-1 text-xs text-slate-500">Equity and liabilities calculated from verified statement values</p>
+              {typeof financials.total_assets === 'number' && financials.total_assets > 0 && typeof financials.total_equity === 'number' && financials.total_equity >= 0 && financials.total_equity <= financials.total_assets ? (
+                <div className="grid grid-cols-1 items-center gap-3 sm:grid-cols-2">
+                  <div className="h-[210px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={[{name:'Equity',value:financials.total_equity},{name:'Liabilities',value:financials.total_assets-financials.total_equity}]} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={4}>{[0,1].map(i=><Cell key={i} fill={['#a3e635','#38bdf8'][i]}/>)}</Pie><Tooltip formatter={(v)=>formatAmount(Number(v),currency,units)}/></PieChart></ResponsiveContainer></div>
+                  <div className="space-y-3 text-xs text-slate-400"><p><span className="mr-2 inline-block h-2 w-2 rounded-full bg-lime-300"/>Equity <strong className="float-right text-white">{formatAmount(financials.total_equity,currency,units)}</strong></p><p><span className="mr-2 inline-block h-2 w-2 rounded-full bg-sky-400"/>Liabilities <strong className="float-right text-white">{formatAmount(financials.total_assets-financials.total_equity,currency,units)}</strong></p></div>
+                </div>
+              ) : <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-xs text-slate-500">Verified total assets and equity are required to render this chart.</div>}
+            </article>
+            <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
+              <h3 className="text-sm font-semibold text-white">Performance trend</h3><p className="mt-1 text-xs text-slate-500">Historical revenue and earnings</p>
+              <div className="mt-5 flex min-h-[210px] flex-col items-center justify-center rounded-xl border border-dashed border-white/10 px-6 text-center"><Activity size={24} className="text-sky-300"/><p className="mt-3 text-sm text-slate-300">Historical series unavailable</p><p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">A trend line requires multiple comparable reporting periods. This upload is treated as one period; no sample data is fabricated.</p></div>
+            </article>
+          </section>
+
           <section className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
 
             <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
