@@ -1590,6 +1590,7 @@ function App() {
                     verified: 'Value supported by a source quotation',
                     calculated: 'Calculated from verified report values',
                     evidence_rejected: 'Model found a value, but its evidence did not pass validation',
+                    insufficient_components: 'Total debt could not be established from the reported debt components',
                     not_found_in_retrieved_text: 'No value returned from the passages retrieved',
                     no_relevant_passages: 'No relevant passages were retrieved for this statement',
                     missing_evidence: 'Value removed because supporting evidence was missing',
