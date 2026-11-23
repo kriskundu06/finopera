@@ -1,6 +1,7 @@
 import hashlib
 import re
 from io import BytesIO
+from pathlib import Path
 
 import pymupdf
 import requests
@@ -13,6 +14,10 @@ from backend.services.financial_analysis import calculate_financial_metrics
 from backend.services.financial_extraction import extract_financials
 from backend.services.rag import answer_question
 from backend.services.vector_store import index_chunks, search_chunks
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DOCUMENT_PAGE_IMAGES = PROJECT_ROOT / "data" / "document_pages"
 
 
 app = FastAPI(
@@ -148,11 +153,21 @@ async def extract_pdf(file: UploadFile = File(...)):
                 # normal text extraction silently misses those figures, so OCR
                 # image-heavy pages when their native text layer is sparse.
                 has_images = bool(page.get_images(full=True))
-                # OCR truly scanned pages with no text layer, and also
-                # image-heavy pages where a partial text layer may omit tables.
-                needs_ocr = len(page_text) < 250 or (
+                # Preserve a high-resolution page image whenever the native
+                # text layer is absent or an embedded image may contain a table.
+                needs_visual = len(page_text) < 250 or (
                     has_images and len(page_text) < 2500
                 )
+                page_image_path = None
+                if needs_visual:
+                    image_dir = DOCUMENT_PAGE_IMAGES / document_id
+                    image_dir.mkdir(parents=True, exist_ok=True)
+                    page_image_path = image_dir / f"page_{page_number}.png"
+                    page.get_pixmap(dpi=250, alpha=False).save(str(page_image_path))
+
+                # OCR improves searchable text, but it is no longer a hard
+                # dependency: Gemini Vision can read the preserved page image.
+                needs_ocr = needs_visual
 
                 if needs_ocr:
                     try:
@@ -184,12 +199,27 @@ async def extract_pdf(file: UploadFile = File(...)):
                                 ),
                             })
                     except Exception as ocr_exc:
-                        raise RuntimeError(
-                            "OCR is required to read image-based tables on "
-                            f"PDF page {page_number}, but OCR failed. Install "
-                            "Tesseract OCR and ensure it is available on PATH. "
-                            f"Original error: {type(ocr_exc).__name__}: {ocr_exc}"
-                        ) from ocr_exc
+                        ocr_skipped_pages.append({
+                            "page": page_number,
+                            "reason": (
+                                "OCR unavailable; preserved page image for "
+                                f"Gemini Vision ({type(ocr_exc).__name__})"
+                            ),
+                        })
+                        print(
+                            f"OCR skipped on PDF page {page_number}; "
+                            "vision image retained for extraction: "
+                            f"{type(ocr_exc).__name__}: {ocr_exc}"
+                        )
+
+                if page_image_path is not None:
+                    image_note = (
+                        "[PAGE IMAGE AVAILABLE FOR VISUAL EXTRACTION. "
+                        "This note is indexing metadata, not source text. "
+                        "The image contains the original page with possible "
+                        "financial statement tables, labels, periods and amounts.]"
+                    )
+                    page_text = f"{page_text}\\n{image_note}".strip()
 
                 pages.append({
                     "page": page_number,
@@ -232,6 +262,11 @@ async def extract_pdf(file: UploadFile = File(...)):
         "ocr_required": bool(ocr_skipped_pages),
         "ocr_pages": ocr_pages,
         "ocr_skipped_pages": ocr_skipped_pages,
+        "visual_pages": [
+            page_number
+            for page_number in range(1, len(pages) + 1)
+            if (DOCUMENT_PAGE_IMAGES / document_id / f"page_{page_number}.png").exists()
+        ],
         "chunk_count": len(chunks),
         "chunks": chunks,
         "indexed_count": indexed_count,
