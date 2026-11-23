@@ -70,7 +70,7 @@ def validate_document_id(document_id: str) -> str:
     """Validate that document_id is a 64-character SHA-256 hex digest."""
     if not re.fullmatch(r"[a-fA-F0-9]{64}", document_id):
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail=(
                 "Invalid document_id. Expected a 64-character "
                 "SHA-256 hexadecimal hash."
