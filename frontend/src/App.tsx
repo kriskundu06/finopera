@@ -61,6 +61,7 @@ const navigation = [
   { label: 'Documents', page: 'Documents', icon: FileText },
   { label: 'AI Analyst', page: 'Ask AI', icon: Bot },
   { label: 'Financial Statements', page: 'Financial analysis', icon: ChartNoAxesCombined },
+  { label: 'Comparisons', page: 'Comparisons', icon: ChartNoAxesCombined },
   { label: 'Settings', page: 'Settings', icon: Settings },
 ]
 
@@ -294,6 +295,14 @@ function App() {
   } | null>(null)
 
   const [financialResult, setFinancialResult] = useState<FinancialAnalysisResponse | null>(null)
+
+  const [comparisonReports, setComparisonReports] = useState<Array<{ filename: string; period: string; currency: string; units: string; financials: Record<string, number | string | null | undefined>; evidence: Record<string, EvidenceReference | null | undefined> }>>([])
+  const [comparisonFiles, setComparisonFiles] = useState<File[]>([])
+  const [comparisonPeriods, setComparisonPeriods] = useState<string[]>([])
+  const [comparisonResult, setComparisonResult] = useState<any>(null)
+  const [comparisonBusy, setComparisonBusy] = useState(false)
+  const [comparisonError, setComparisonError] = useState('')
+  const [comparisonMessage, setComparisonMessage] = useState('')
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
 
@@ -807,7 +816,34 @@ function App() {
 
         <main className="mx-auto max-w-[1600px] space-y-7 px-5 py-7 sm:px-8 sm:py-9">
 
-          {activePage === 'Settings' ? (
+          {activePage === 'Comparisons' ? (
+            <section className="space-y-6">
+              <div>
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[.16em] text-lime-300">Financial intelligence</p>
+                <h2 className="text-2xl font-semibold text-white sm:text-3xl">Multi-period comparison</h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Analyze multiple quarterly or annual reports together. Add at least two reports, label each period, and compare their reported financial figures.</p>
+              </div>
+              <div className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
+                <h3 className="text-sm font-semibold text-white">1. Add financial reports</h3>
+                <p className="mt-1 text-xs leading-5 text-slate-500">Each PDF is uploaded and analyzed independently. Use consistent currency and units across reports.</p>
+                <input type="file" accept=".pdf,application/pdf" multiple className="mt-4 block w-full text-sm text-slate-400 file:mr-4 file:rounded-lg file:border-0 file:bg-lime-500/15 file:px-4 file:py-2.5 file:text-xs file:font-semibold file:text-lime-300 hover:file:bg-lime-500/25" onChange={e=>{const files=Array.from(e.target.files||[]).filter(f=>f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf'));setComparisonFiles(files.slice(0,12));setComparisonPeriods(files.slice(0,12).map(f=>f.name.replace(/\.pdf$/i,'')));setComparisonResult(null);setComparisonError('');}}/>
+                {comparisonFiles.length>0 && <div className="mt-4 space-y-3">{comparisonFiles.map((file,index)=><div key={file.name+index} className="grid gap-2 sm:grid-cols-[1fr_1fr] sm:items-center"><p className="truncate text-xs text-slate-300">{file.name}</p><input value={comparisonPeriods[index]||''} onChange={e=>setComparisonPeriods(current=>current.map((period,i)=>i===index?e.target.value:period))} placeholder="e.g. FY 2025 or Q1 2026" className="rounded-lg border border-white/10 bg-[#090d18] px-3 py-2 text-xs text-white outline-none focus:border-lime-400/50"/></div>)}</div>}
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <button disabled={comparisonBusy||comparisonFiles.length<2||comparisonPeriods.some(p=>!p.trim())} onClick={async()=>{setComparisonBusy(true);setComparisonError('');setComparisonMessage('Uploading and analyzing reports…');setComparisonReports([]);setComparisonResult(null);try{const records=[];for(let i=0;i<comparisonFiles.length;i++){const file=comparisonFiles[i];const form=new FormData();form.append('file',file);const upload=await fetch(`${API_BASE_URL}/documents/extract`,{method:'POST',body:form});const up=await upload.json().catch(()=>({}));if(!upload.ok)throw new Error(up.detail||`Could not upload ${file.name}`);const analyze=await fetch(`${API_BASE_URL}/financial-analyze-document?document_id=${encodeURIComponent(up.document_id)}&filename=${encodeURIComponent(up.filename||file.name)}`,{method:'POST'});const data=await analyze.json().catch(()=>({}));if(!analyze.ok)throw new Error(data.detail||`Could not analyze ${file.name}`);records.push({filename:file.name,period:comparisonPeriods[i].trim(),currency:data.currency||data.financials?.currency||'unspecified',units:data.units||data.financials?.units||'unspecified',financials:data.financials||{},evidence:data.evidence||{}});setComparisonMessage(`Analyzed ${i+1} of ${comparisonFiles.length} reports…`);}setComparisonReports(records);const response=await fetch(`${API_BASE_URL}/financial-analysis/compare`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reports:records})});const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.detail||'Could not compare these reports.');setComparisonResult(result);setComparisonMessage('Comparison ready. Review the extracted figures and verify them against the source reports.');}catch(error){setComparisonError(error instanceof Error?error.message:'Comparison failed.');setComparisonMessage('');}finally{setComparisonBusy(false);}}} className="inline-flex items-center gap-2 rounded-xl bg-lime-500 px-4 py-3 text-sm font-medium text-white transition hover:bg-lime-400 disabled:cursor-not-allowed disabled:opacity-40"><Upload size={16}/>{comparisonBusy?'Analyzing reports…':'Analyze and compare reports'}</button>
+                  <span className="text-xs text-slate-500">{comparisonFiles.length}/12 reports selected</span>
+                </div>
+                {comparisonMessage&&<p className="mt-3 text-xs text-lime-300">{comparisonMessage}</p>}{comparisonError&&<p className="mt-3 text-xs text-rose-300">{comparisonError}</p>}
+              </div>
+              {comparisonResult&&<div className="space-y-5">
+                <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-xl border border-white/[0.07] bg-[#0e1422] p-4"><p className="text-xs text-slate-500">Reporting periods</p><p className="mt-2 text-xl font-semibold text-white">{comparisonResult.periods.length}</p></div><div className="rounded-xl border border-white/[0.07] bg-[#0e1422] p-4"><p className="text-xs text-slate-500">Currency</p><p className="mt-2 text-xl font-semibold text-white">{comparisonResult.currency}</p></div><div className="rounded-xl border border-white/[0.07] bg-[#0e1422] p-4"><p className="text-xs text-slate-500">Units</p><p className="mt-2 text-xl font-semibold text-white">{comparisonResult.units}</p></div></div>
+                <div className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5"><h3 className="mb-4 text-sm font-semibold text-white">Revenue and profitability</h3>{['revenue','operating_income','net_income'].map(field=><div key={field} className="mb-5 last:mb-0"><p className="mb-2 text-xs text-slate-400">{field.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}</p><div className="h-36"><ResponsiveContainer width="100%" height="100%"><LineChart data={comparisonResult.series[field]}><CartesianGrid strokeDasharray="3 3" stroke="#263244"/><XAxis dataKey="period" stroke="#94a3b8" tick={{fontSize:10}}/><YAxis stroke="#94a3b8" tick={{fontSize:10}}/><Tooltip contentStyle={{background:'#111827',border:'1px solid #334155',borderRadius:10}}/><Line type="monotone" dataKey="value" stroke="#a3e635" strokeWidth={2.5} connectNulls={false} dot={{r:4}}/></LineChart></ResponsiveContainer></div></div>)}</div>
+                <div className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5"><h3 className="mb-4 text-sm font-semibold text-white">Balance sheet trends</h3>{['total_debt','total_assets','total_equity'].map(field=><div key={field} className="mb-5 last:mb-0"><p className="mb-2 text-xs text-slate-400">{field.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}</p><div className="h-32"><ResponsiveContainer width="100%" height="100%"><LineChart data={comparisonResult.series[field]}><CartesianGrid strokeDasharray="3 3" stroke="#263244"/><XAxis dataKey="period" stroke="#94a3b8" tick={{fontSize:10}}/><YAxis stroke="#94a3b8" tick={{fontSize:10}}/><Tooltip contentStyle={{background:'#111827',border:'1px solid #334155',borderRadius:10}}/><Line type="monotone" dataKey="value" stroke="#67e8f9" strokeWidth={2.5} connectNulls={false} dot={{r:4}}/></LineChart></ResponsiveContainer></div></div>)}</div>
+                <div className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5"><h3 className="mb-3 text-sm font-semibold text-white">Period-to-period changes</h3><div className="overflow-x-auto"><table className="w-full min-w-[600px] text-left text-xs"><thead className="text-slate-500"><tr><th className="pb-3">Metric</th>{comparisonResult.periods.slice(1).map((period:string)=><th key={period} className="pb-3">{period}</th>)}</tr></thead><tbody>{Object.entries(comparisonResult.changes).map(([field,items]:[string,any])=><tr key={field} className="border-t border-white/[0.06]"><td className="py-3 text-slate-300">{field.replace(/_/g,' ')}</td>{items.map((item:any,index:number)=><td key={index} className="py-3 text-slate-300">{item.percentage_change===null?'—':`${item.percentage_change>0?'+':''}${item.percentage_change.toFixed(2)}%`}</td>)}</tr>)}</tbody></table></div></div>
+                <div className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5"><h3 className="mb-3 text-sm font-semibold text-white">AI-assisted trend summary</h3><p className="mb-3 text-xs leading-5 text-slate-500">Rule-based observations from the extracted figures, not an independent audit or risk opinion.</p><ul className="space-y-2">{comparisonResult.insights.map((item:any,index:number)=><li key={index} className="text-sm leading-6 text-slate-300">• {item.text}</li>)}</ul>{comparisonResult.notes.map((note:string,index:number)=><p key={index} className="mt-2 text-xs text-slate-500">{note}</p>)}</div>
+                <button onClick={async()=>{try{const response=await fetch(`${API_BASE_URL}/financial-analysis/compare/report`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reports:comparisonReports,currency:comparisonResult.currency,units:comparisonResult.units,changes:comparisonResult.changes})});if(!response.ok){const payload=await response.json().catch(()=>({}));throw new Error(payload.detail||'PDF export failed.');}const blob=await response.blob();const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='finopera-comparison.pdf';document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);}catch(error){setComparisonError(error instanceof Error?error.message:'PDF export failed.');}}} className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 hover:bg-white/[0.04]"><Download size={16}/>Export comparison PDF</button>
+              </div>}
+            </section>
+          ) : {activePage === 'Settings' ? (
 
             <section className="mx-auto w-full max-w-5xl space-y-7">
 
