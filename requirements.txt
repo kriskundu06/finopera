@@ -26,3 +26,5 @@ websockets==17.2
 google-genai
 httpx2
 pytest
+chromadb
+sentence-transformers
