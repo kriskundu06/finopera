@@ -576,3 +576,124 @@ def ask_question_endpoint(request: AskRequest):
             status_code=502,
             detail="AI Analyst could not reach its provider. Please try again.",
         ) from exc
+
+
+
+@app.post("/financial-analysis/compare")
+def compare_financial_periods(payload: dict = Body(...)):
+    """Compare independently extracted reports on a consistent reporting basis."""
+    reports = payload.get("reports")
+    if not isinstance(reports, list) or len(reports) < 2:
+        raise HTTPException(status_code=400, detail="Add at least two analyzed reports.")
+    if len(reports) > 12:
+        raise HTTPException(status_code=400, detail="A maximum of 12 reports can be compared.")
+
+    fields = ("revenue", "operating_income", "net_income", "current_assets",
+              "current_liabilities", "total_debt", "total_equity", "total_assets")
+    normalized = []
+    seen = set()
+    for index, report in enumerate(reports):
+        if not isinstance(report, dict) or not isinstance(report.get("financials"), dict):
+            raise HTTPException(status_code=400, detail=f"Report {index + 1} has invalid financial data.")
+        period = str(report.get("period") or "").strip()
+        if not period:
+            raise HTTPException(status_code=400, detail=f"Add a reporting period for report {index + 1}.")
+        if period.casefold() in seen:
+            raise HTTPException(status_code=400, detail=f"Reporting period '{period}' is duplicated.")
+        seen.add(period.casefold())
+        normalized.append(report)
+
+    currencies = {str(r.get("currency") or "unspecified").strip().upper() for r in normalized}
+    units = {str(r.get("units") or "unspecified").strip().lower() for r in normalized}
+    if len(currencies) != 1 or len(units) != 1 or "UNSPECIFIED" in currencies or "unspecified" in units:
+        raise HTTPException(status_code=400, detail="All reports must specify the same currency and units. Convert them to a common basis first.")
+
+    series = {}
+    changes = {}
+    for field in fields:
+        points = []
+        for report in normalized:
+            value = report["financials"].get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                value = None
+            points.append({"period": report["period"], "value": value})
+        series[field] = points
+        field_changes = []
+        for previous, current in zip(points, points[1:]):
+            old, new = previous["value"], current["value"]
+            field_changes.append({
+                "from_period": previous["period"], "to_period": current["period"],
+                "absolute_change": round(new-old, 2) if old is not None and new is not None else None,
+                "percentage_change": round((new-old)/abs(old)*100, 2) if old not in (None, 0) and new is not None else None,
+            })
+        changes[field] = field_changes
+
+    insights = []
+    for field, label in (("revenue", "Revenue"), ("operating_income", "Operating income"),
+                         ("net_income", "Net income"), ("total_debt", "Total debt"),
+                         ("total_assets", "Total assets")):
+        values = [p for p in series[field] if p["value"] is not None]
+        if len(values) >= 2:
+            first, last = values[0], values[-1]
+            if first["value"] != 0:
+                pct = (last["value"]-first["value"])/abs(first["value"])*100
+                direction = "increased" if pct > 0 else "decreased" if pct < 0 else "was unchanged"
+                insights.append({"field": field, "text": f"{label} {direction} by {abs(pct):.2f}% from {first['period']} to {last['period']}."})
+    return {
+        "periods": [r["period"] for r in normalized],
+        "reports": [{"period": r["period"], "filename": r.get("filename", "Report")} for r in normalized],
+        "currency": next(iter(currencies)), "units": next(iter(units)),
+        "series": series, "changes": changes, "insights": insights,
+        "notes": ["Periods are compared in the order supplied; arrange them chronologically.",
+                  "Percentage changes are unavailable when the earlier value is zero or either value is missing.",
+                  "Only reported figures are compared; missing values are never treated as zero."]
+    }
+
+
+@app.post("/financial-analysis/compare/report")
+def export_comparison_report(payload: dict = Body(...)):
+    """Export a concise PDF comparison of multiple reporting periods."""
+    from io import BytesIO
+    from xml.sax.saxutils import escape
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    reports = payload.get("reports") or []
+    fields = ("revenue", "operating_income", "net_income", "current_assets",
+              "current_liabilities", "total_debt", "total_equity", "total_assets")
+    if len(reports) < 2:
+        raise HTTPException(status_code=400, detail="At least two reports are required.")
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=32, leftMargin=32, topMargin=36, bottomMargin=36)
+    styles = getSampleStyleSheet()
+    periods = [str(r.get("period", "")) for r in reports]
+    rows = [["Financial metric", *periods]]
+    for field in fields:
+        rows.append([field.replace("_", " ").title()] + [
+            "—" if not isinstance(r.get("financials", {}).get(field), (int, float))
+            else f'{r["financials"][field]:,.2f}' for r in reports
+        ])
+    table = Table(rows, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#243047")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#CBD5E1")),
+        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#F1F5F9")]),
+        ("FONTSIZE", (0,0), (-1,-1), 8), ("PADDING", (0,0), (-1,-1), 6),
+    ]))
+    story = [Paragraph("FinOpera — Multi-period Financial Comparison", styles["Title"]),
+             Spacer(1, 10),
+             Paragraph(f'Currency: {escape(str(payload.get("currency", "unspecified")))} · Units: {escape(str(payload.get("units", "unspecified")))}', styles["Normal"]),
+             Spacer(1, 16), table, Spacer(1, 18),
+             Paragraph("Period-to-period changes", styles["Heading2"])]
+    for field, entries in (payload.get("changes") or {}).items():
+        for item in entries:
+            pct = item.get("percentage_change")
+            if pct is not None:
+                story.append(Paragraph(f'{escape(field.replace("_", " ").title())}: {pct:+.2f}% ({escape(str(item.get("from_period")))} to {escape(str(item.get("to_period")))})', styles["Normal"]))
+    story.extend([Spacer(1, 14), Paragraph("Model-assisted extraction. Verify material figures against the original reports before relying on them.", styles["Italic"])])
+    doc.build(story)
+    buffer.seek(0)
+    return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="finopera-comparison.pdf"'})
