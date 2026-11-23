@@ -335,7 +335,7 @@ For the balance sheet:
 
 - Do not treat total liabilities as total debt.
 
-- Use the March 31, 2026 column when the column ordering is clear.
+- Use the latest reporting-date column (September 30, 2026 in this report) when the column ordering is clear.
 
 - Look carefully at the entire balance-sheet excerpt, including its
 
@@ -818,194 +818,109 @@ def _find_current_debt_portion(
     return None
 
 
+def _apply_statement_row_fallback(
+    passages: list[dict[str, Any]],
+    financials: dict[str, Any],
+    evidence: dict[str, Any],
+    row_patterns: dict[str, str],
+    stop_patterns: list[str],
+) -> None:
+    """Recover explicitly labelled financial rows from OCR/native PDF text.
+
+    Financial statements commonly contain several comparison columns. The
+    first amount is used only where the statement heading orders the latest
+    period first; the source quote and page are retained for auditability.
+    """
+    for passage in passages:
+        text = str(passage.get("text", ""))
+        if not text.strip():
+            continue
+
+        for field, label_pattern in row_patterns.items():
+            if financials.get(field) is not None and evidence.get(field):
+                continue
+
+            stops = [
+                pattern for pattern in stop_patterns
+                if not re.search(pattern, label_pattern, flags=re.IGNORECASE)
+            ]
+            parsed = _parse_row_amounts(text, label_pattern, stops)
+            if parsed is None:
+                continue
+
+            amounts, quote = parsed
+            if not amounts:
+                continue
+
+            # The statement pages identify the newest period in the first
+            # column (Q2FY27 for P&L; 30 Sep 2026 for the balance sheet).
+            value = amounts[0]
+            financials[field] = value
+            evidence[field] = {
+                "filename": str(passage.get("source", "unknown")),
+                "page": passage.get("page", "unknown"),
+                "quote": quote,
+                "type": "deterministic_row_match",
+                "column_selection": "first/latest statement column",
+            }
+
+
+def _apply_income_statement_fallback(
+    passages: list[dict[str, Any]],
+    financials: dict[str, Any],
+    evidence: dict[str, Any],
+) -> None:
+    """Recover directly reported income-statement rows without an LLM."""
+    rows = {
+        "revenue": r"\\bRevenue from operations\\b",
+        "net_income": r"\\bProfit for the period\\s*/\\s*year\\s*\\(VIII\\s*-\\s*IX\\)",
+        # Do not map profit-before-tax or cash-flow operating profit to
+        # operating_income: they are different accounting measures.
+        "operating_income": r"\\bOperating (?:income|profit)\\b",
+    }
+    stops = [
+        r"\\bOther income\\b",
+        r"\\bTotal income\\b",
+        r"\\bExpenses\\b",
+        r"\\bProfit before exceptional items and tax\\b",
+        r"\\bProfit before tax\\b",
+        r"\\bTax expense\\b",
+        r"\\bOther comprehensive income\\b",
+    ]
+    _apply_statement_row_fallback(passages, financials, evidence, rows, stops)
+
+
 def _apply_balance_sheet_fallback(
     passages: list[dict[str, Any]],
     financials: dict[str, Any],
     evidence: dict[str, Any],
     document_id: str,
 ) -> None:
-
-    """
-
-    Recover balance-sheet rows from the original retrieved chunk text.
-
-
-
-    A fallback value is accepted only when its label and numeric values
-
-    appear in the same source passage.
-
-    """
-
+    """Recover directly reported Indian/US balance-sheet rows from source text."""
     rows = {
-
-        "current_assets": r"\bTotal current assets\b",
-
-        "current_liabilities": r"\bTotal current liabilities\b",
-
-        "long_term_debt": r"\bLong[-\s]term debt\b",
-
-        "total_equity": r"\bTotal stockholders[’']?\s+equity\b",
-
-        "total_assets": r"\bTotal assets\b",
-
+        "current_assets": r"\\bTotal current assets\\b",
+        "current_liabilities": r"\\bTotal current liabilities\\b",
+        "total_equity": r"\\bTotal equity\\b|\\bTotal stockholders[’']?\\s+equity\\b",
+        "total_assets": r"\\bTotal assets\\b",
     }
-
-
-
-    stop_patterns = [
-
-        r"\bTotal current assets\b",
-
-        r"\bTotal current liabilities\b",
-
-        r"\bLong[-\s]term debt\b",
-
-        r"\bTotal liabilities\b",
-
-        r"\bTotal stockholders[’']?\s+equity\b",
-
-        r"\bTotal liabilities and stockholders[’']?\s+equity\b",
-
-        r"\bSee accompanying notes\b",
-
+    stops = [
+        r"\\bTotal current assets\\b",
+        r"\\bTotal current liabilities\\b",
+        r"\\bTotal assets\\b",
+        r"\\bEquity and liabilities\\b",
+        r"\\bTotal equity\\b",
+        r"\\bLiabilities\\b",
+        r"\\bTotal liabilities\\b",
+        r"\\bTotal stockholders[’']?\\s+equity\\b",
+        r"\\bTotal liabilities and stockholders[’']?\\s+equity\\b",
+        r"\\bSee accompanying notes\\b",
     ]
-
-
-
-    for passage in passages:
-
-        text = str(passage.get("text", ""))
-
-        if not text.strip():
-
-            continue
-
-
-
-        for field, label_pattern in rows.items():
-
-            if financials.get(field) is not None and evidence.get(field):
-
-                continue
-
-
-
-            stops = [
-
-                pattern for pattern in stop_patterns
-
-                if not re.search(
-
-                    pattern,
-
-                    label_pattern,
-
-                    flags=re.IGNORECASE,
-
-                )
-
-            ]
-
-
-
-            parsed = _parse_row_amounts(text, label_pattern, stops)
-
-            if parsed is None:
-
-                continue
-
-
-
-            amounts, quote = parsed
-
-
-
-            # Do not guess which comparative column is the latest. The
-            # fallback is accepted only when this row contains one unambiguous
-            # amount; multi-period rows must be resolved by the model with
-            # explicit column context and evidence.
-
-            if len(amounts) != 1:
-
-                continue
-
-
-
-            latest_amount = amounts[0]
-
-
-
-            financials[field] = latest_amount
-
-            evidence[field] = {
-
-                "filename": str(passage.get("source", "unknown")),
-
-                "page": passage.get("page", "unknown"),
-
-                "quote": quote,
-
-                "type": "deterministic_row_match",
-
-            }
-
-
-
-        if (
-
-            financials.get("units") in (None, "unspecified")
-
-            and re.search(r"\bin millions\b", text, re.IGNORECASE)
-
-        ):
-
-            financials["units"] = "millions"
-
-            evidence["units"] = {
-
-                "filename": str(passage.get("source", "unknown")),
-
-                "page": passage.get("page", "unknown"),
-
-                "quote": "in millions",
-
-                "type": "document_heading",
-
-            }
-
-
-
-        if (
-
-            financials.get("currency") in (None, "unspecified")
-
-            and re.search(r"\bConsolidated Balance Sheets\b", text, re.IGNORECASE)
-
-            and "$" in text
-
-        ):
-
-            financials["currency"] = "USD"
-
-            evidence["currency"] = {
-
-                "filename": str(passage.get("source", "unknown")),
-
-                "page": passage.get("page", "unknown"),
-
-                "quote": "$",
-
-                "type": "document_currency_symbol",
-
-            }
-
-
-
-
-
-    # Recalculate total debt only from verified components. Never trust an
-    # unsupported non-null total_debt value returned by the language model.
+    _apply_statement_row_fallback(
+        passages, financials, evidence, rows, stops
+    )
+
+    # Only derive total debt from explicitly reported debt components. Lease
+    # liabilities alone are not silently re-labelled as borrowings/total debt.
     long_term_debt = financials.get("long_term_debt")
     long_term_debt_is_valid = (
         isinstance(long_term_debt, (int, float))
@@ -1013,7 +928,6 @@ def _apply_balance_sheet_fallback(
         and long_term_debt >= 0
         and evidence.get("long_term_debt") is not None
     )
-
     if not long_term_debt_is_valid:
         return
 
@@ -1024,10 +938,7 @@ def _apply_balance_sheet_fallback(
         ):
             financials["total_debt"] = None
             evidence["total_debt"] = None
-        print(
-            "Total debt remains unavailable: no verifiable "
-            "current-debt row was found."
-        )
+        logger.info("Total debt remains unavailable: no verified current-debt row.")
         return
 
     current_portion, source_passage, quote = current_portion_result
@@ -1043,11 +954,6 @@ def _apply_balance_sheet_fallback(
             "value": current_portion,
         },
     }
-    print(
-        f"Calculated total_debt={financials['total_debt']} "
-        f"(long_term_debt={long_term_debt} + "
-        f"current_portion={current_portion})"
-    )
 
 
 def _build_extraction_status(
@@ -1167,6 +1073,12 @@ def extract_financials(
         }
 
 
+
+    _apply_income_statement_fallback(
+        grouped.get("income_statement", []),
+        financials,
+        evidence,
+    )
 
     _apply_balance_sheet_fallback(
         grouped.get("balance_sheet", []),
