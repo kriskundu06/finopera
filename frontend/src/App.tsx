@@ -45,6 +45,7 @@ import {
   LoaderCircle,
 
   ExternalLink,
+  Download,
 
   ShieldAlert,
 
@@ -392,6 +393,51 @@ function App() {
 
   }
 
+  function downloadOriginalPdf() {
+    if (!documentInfo?.document_id) return
+    const link = document.createElement('a')
+    link.href = `${API_BASE_URL}/documents/${encodeURIComponent(documentInfo.document_id)}/download`
+    link.download = documentInfo.filename || 'original-report.pdf'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  async function downloadAnalysisPdf() {
+    if (!financialResult || !documentInfo) return
+    try {
+      const response = await fetch(`${API_BASE_URL}/financial-analysis/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: documentInfo.filename,
+          reporting_period: financialResult.reporting_period,
+          currency,
+          units,
+          extraction_status: financialResult.extraction_status,
+          financials,
+          evidence: financialResult.evidence,
+          analysis: financialResult.analysis,
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.detail || 'Could not generate the analysis PDF.')
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'finopera-financial-analysis.pdf'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Could not download the analysis PDF.')
+    }
+  }
+
   async function askQuestion(questionOverride?: string) {
 
     const question = (questionOverride ?? chatInput).trim()
@@ -530,6 +576,8 @@ function App() {
         page: typeof item.page === 'number' ? item.page : null,
 
         quote: typeof item.quote === 'string' ? item.quote : null,
+        type: typeof item.type === 'string' ? item.type : undefined,
+        formula: typeof item.formula === 'string' ? item.formula : undefined,
 
       }
 
@@ -912,6 +960,10 @@ function App() {
             <section className="space-y-6">
               <div><p className="mb-2 text-[11px] font-semibold uppercase tracking-[.16em] text-lime-300">Extracted data</p><h2 className="text-2xl font-semibold text-white sm:text-3xl">Financial statements</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Extracted values are shown with their source page or calculation evidence. Missing values remain blank rather than being treated as zero.</p></div>
               {!financialResult ? <div className="rounded-2xl border border-dashed border-white/10 bg-[#0e1422] p-10 text-center text-sm text-slate-500">Upload and analyze a report to view its financial statements.</div> : <>
+                <div className="flex flex-wrap gap-3">
+                  <button type="button" onClick={downloadOriginalPdf} disabled={!documentInfo?.document_id} className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2.5 text-xs font-medium text-slate-200 transition hover:border-lime-400/40 hover:bg-white/[.04] disabled:opacity-40"><Download size={15}/> Download original PDF</button>
+                  <button type="button" onClick={downloadAnalysisPdf} className="inline-flex items-center gap-2 rounded-xl bg-lime-500 px-4 py-2.5 text-xs font-medium text-white transition hover:bg-lime-400"><FileText size={15}/> Export financial analysis</button>
+                </div>
                 <div className={`flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-start sm:justify-between ${financialResult.extraction_status === 'partial' ? 'border-amber-400/25 bg-amber-400/[.06]' : financialResult.extraction_status === 'failed' || financialResult.extraction_status === 'no_evidence' ? 'border-rose-400/25 bg-rose-400/[.06]' : 'border-emerald-400/20 bg-emerald-400/[.05]'}`}>
                   <div className="flex items-start gap-3">
                     {financialResult.extraction_status === 'partial' ? <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-300"/> : financialResult.extraction_status === 'failed' || financialResult.extraction_status === 'no_evidence' ? <ShieldAlert size={18} className="mt-0.5 shrink-0 text-rose-300"/> : <Activity size={18} className="mt-0.5 shrink-0 text-emerald-300"/>}
