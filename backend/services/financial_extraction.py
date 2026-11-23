@@ -858,15 +858,18 @@ def _apply_balance_sheet_fallback(
 
 
 
-            # The statement shows December 2025 first and March 2026 second.
+            # Do not guess which comparative column is the latest. The
+            # fallback is accepted only when this row contains one unambiguous
+            # amount; multi-period rows must be resolved by the model with
+            # explicit column context and evidence.
 
-            if len(amounts) < 2:
+            if len(amounts) != 1:
 
                 continue
 
 
 
-            latest_amount = amounts[-1]
+            latest_amount = amounts[0]
 
 
 
