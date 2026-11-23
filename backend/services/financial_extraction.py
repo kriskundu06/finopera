@@ -1,10 +1,14 @@
 import json
+import logging
 import os
 import re
+import time
 from typing import Any
 from dotenv import load_dotenv
 from google import genai
 from backend.services.vector_store import search_chunks
+
+logger = logging.getLogger(__name__)
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -12,31 +16,26 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 MAX_CHARS_PER_PASSAGE = 6000
 
-MAX_PASSAGES_PER_STATEMENT = 4
+MAX_PASSAGES_PER_STATEMENT = 10
 
 MAX_BALANCE_SHEET_PASSAGES = 18
 
-MAX_RESULTS_PER_QUERY = 5
+MAX_RESULTS_PER_QUERY = 8
 
-MAX_PASSAGES_PER_QUERY = 2
+MAX_PASSAGES_PER_QUERY = 3
 
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 STATEMENT_QUERIES = {
     "income_statement": [
-        "income statement revenue sales cost of revenue gross profit operating income net income",
-        "statement of operations total revenues costs expenses net earnings",
+        "income statement revenue sales operating income net income",
+        "statement of operations total revenue operating profit profit after tax",
+        "quarterly revenue from operations operating profit net profit",
     ],
     "balance_sheet": [
         "consolidated balance sheet total assets total liabilities total equity",
-        "total current assets total current liabilities",
-        "long-term debt short-term debt current portion borrowings notes payable",
+        "total current assets total current liabilities total debt borrowings",
         "total stockholders equity shareholders equity",
-        "total assets total liabilities and equity",
-    ],
-    "cash_flow": [
-        "statement of cash flows net cash provided by operating activities",
-        "capital expenditures purchases of property plant and equipment",
     ],
     "reporting_details": [
         "financial statements reporting currency units in thousands millions",
@@ -46,90 +45,36 @@ STATEMENT_QUERIES = {
 
 
 STATEMENT_FIELDS = {
-
     "income_statement": [
-
         "revenue",
-
-        "cost_of_revenue",
-
-        "gross_profit",
-
         "operating_income",
-
         "net_income",
-
     ],
-
     "balance_sheet": [
-
         "current_assets",
-
         "current_liabilities",
-
-        "long_term_debt",
-
         "total_debt",
-
         "total_equity",
-
         "total_assets",
-
     ],
-
-    "cash_flow": [
-
-        "operating_cash_flow",
-
-        "capital_expenditure",
-
-    ],
-
     "reporting_details": [
-
         "currency",
-
         "units",
-
         "reporting_period",
-
     ],
-
 }
-
 
 
 NUMERIC_FIELDS = {
-
     "revenue",
-
-    "cost_of_revenue",
-
-    "gross_profit",
-
     "operating_income",
-
     "net_income",
-
     "current_assets",
-
     "current_liabilities",
-
-    "long_term_debt",
-
     "total_debt",
-
     "total_equity",
-
     "total_assets",
-
-    "operating_cash_flow",
-
-    "capital_expenditure",
-
 }
-
-
 
 
 
@@ -143,6 +88,8 @@ def _retrieve_statement_passages(
     authoritative filter so same-named PDFs cannot be mixed.
     """
     grouped: dict[str, list[dict[str, Any]]] = {}
+    successful_queries = 0
+    retrieval_errors: list[Exception] = []
 
     for statement, queries in STATEMENT_QUERIES.items():
         passages: list[dict[str, Any]] = []
@@ -150,7 +97,7 @@ def _retrieve_statement_passages(
         limit = (
             MAX_BALANCE_SHEET_PASSAGES
             if statement == "balance_sheet"
-            else MAX_PASSAGES_PER_STATEMENT
+            else 10
         )
 
         for query in queries:
@@ -164,12 +111,14 @@ def _retrieve_statement_passages(
                     document_id=document_id,
                 )
             except Exception as exc:
-                print(
-                    f"Retrieval warning for {statement}: "
-                    f"{type(exc).__name__}: {exc}"
+                retrieval_errors.append(exc)
+                logger.exception(
+                    "Passage retrieval failed for statement %s",
+                    statement,
                 )
                 continue
 
+            successful_queries += 1
             added_for_query = 0
             for chunk in results:
                 # Defensive isolation check in addition to the vector-store filter.
@@ -199,9 +148,28 @@ def _retrieve_statement_passages(
                     break
 
         grouped[statement] = passages
-        print(
-            f"Retrieved {len(passages)} passages for {statement} "
-            f"from document {document_id[:12]}..."
+        logger.info(
+            "Retrieved %s passages for %s from document %s",
+            len(passages),
+            statement,
+            document_id[:12],
+        )
+
+    # An empty result is meaningful only when the vector store answered the
+    # retrieval requests. If every query failed, do not misreport an outage
+    # as a document with no financial evidence.
+    if successful_queries == 0 and retrieval_errors:
+        raise RuntimeError(
+            "Document passage retrieval failed. Check the vector database "
+            "and embedding service, then retry."
+        ) from retrieval_errors[-1]
+
+    if retrieval_errors:
+        logger.warning(
+            "Document extraction continued with partial retrieval: "
+            "%s of %s retrieval queries failed",
+            len(retrieval_errors),
+            successful_queries + len(retrieval_errors),
         )
 
     return grouped
@@ -413,35 +381,44 @@ DOCUMENT EXCERPTS:
 
 
 
-    try:
+    response = None
+    max_attempts = 3
 
-        response = client.models.generate_content(
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config={
+                    "temperature": 0,
+                    "response_mime_type": "application/json",
+                    "max_output_tokens": 2600,
+                },
+            )
+            break
+        except Exception as exc:
+            # Retry only transient provider/service failures. Invalid requests,
+            # authentication failures and malformed prompts should fail fast.
+            status_code = getattr(exc, "code", None) or getattr(
+                exc, "status_code", None
+            )
+            transient = status_code in {429, 500, 502, 503, 504}
+            if not transient or attempt == max_attempts:
+                raise RuntimeError(
+                    f"Gemini request failed for {statement}: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
 
-            model=GEMINI_MODEL,
+            delay_seconds = 2 ** (attempt - 1)
+            logger.warning(
+                "Transient Gemini failure for %s (attempt %s/%s, status=%s); "
+                "retrying in %s seconds",
+                statement, attempt, max_attempts, status_code, delay_seconds,
+            )
+            time.sleep(delay_seconds)
 
-            contents=prompt,
-
-            config={
-
-                "temperature": 0,
-
-                "response_mime_type": "application/json",
-
-                "max_output_tokens": 2600,
-
-            },
-
-        )
-
-    except Exception as exc:
-
-        raise RuntimeError(
-
-            f"Gemini request failed for {statement}: "
-
-            f"{type(exc).__name__}: {exc}"
-
-        ) from exc
+    if response is None:
+        raise RuntimeError(f"Gemini returned no response for {statement}.")
 
 
 
@@ -858,15 +835,18 @@ def _apply_balance_sheet_fallback(
 
 
 
-            # The statement shows December 2025 first and March 2026 second.
+            # Do not guess which comparative column is the latest. The
+            # fallback is accepted only when this row contains one unambiguous
+            # amount; multi-period rows must be resolved by the model with
+            # explicit column context and evidence.
 
-            if len(amounts) < 2:
+            if len(amounts) != 1:
 
                 continue
 
 
 
-            latest_amount = amounts[-1]
+            latest_amount = amounts[0]
 
 
 
@@ -1009,38 +989,34 @@ def extract_financials(
 
 
 
-    for statement, fields in STATEMENT_FIELDS.items():
+    statement_errors: dict[str, str] = {}
 
+    for statement, fields in STATEMENT_FIELDS.items():
         passages = grouped.get(statement, [])
 
-
-
         if not passages:
-
             for field in fields:
-
                 financials[field] = None
-
                 evidence[field] = None
-
             continue
 
-
-
-        values, field_evidence, source_map = _extract_statement(
-
-            statement,
-
-            passages,
-
-        )
-
-
+        try:
+            values, field_evidence, source_map = _extract_statement(
+                statement,
+                passages,
+            )
+        except RuntimeError as exc:
+            # Keep successful statements; a temporary provider outage for one
+            # statement must not discard already extracted, evidenced values.
+            logger.exception("Extraction failed for statement %s", statement)
+            statement_errors[statement] = str(exc)
+            for field in fields:
+                financials[field] = None
+                evidence[field] = None
+            continue
 
         financials.update(values)
-
         evidence.update(field_evidence)
-
         all_sources.extend(source_map)
 
 
@@ -1062,12 +1038,11 @@ def extract_financials(
             "reporting_period": None,
 
             "message": (
-
                 "No relevant financial passages found. Upload and index a "
-
                 "financial report first."
-
             ),
+            "extraction_status": "failed" if statement_errors else "no_evidence",
+            "statement_errors": statement_errors,
 
         }
 
@@ -1121,6 +1096,15 @@ def extract_financials(
         }
 
 
+
+    # Keep the API response focused on the eight core figures. Long-term debt
+    # may be used internally to calculate total debt, but is not exposed as a
+    # separate headline figure.
+    financials = {
+        key: value for key, value in financials.items()
+        if key in NUMERIC_FIELDS or key in {"currency", "units", "reporting_period"}
+    }
+    evidence = {key: value for key, value in evidence.items() if key in financials}
 
     # Final integrity audit: never return a populated extracted field without evidence.
     for field in NUMERIC_FIELDS:
@@ -1205,12 +1189,18 @@ def extract_financials(
         "reporting_period": reporting_period,
 
         "sources": unique_sources,
+        "extraction_status": "partial" if statement_errors else "completed",
+        "statement_errors": statement_errors,
 
         "message": (
 
-            "Extraction completed. Verify figures and supporting evidence "
-
-            "against the original statements before relying on the analysis."
+            (
+                "Extraction partially completed. Some statements could not be "
+                "processed; verify available figures and evidence against the PDF."
+                if statement_errors else
+                "Extraction completed. Verify figures and supporting evidence "
+                "against the original statements before relying on the analysis."
+            )
 
         ),
 

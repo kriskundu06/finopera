@@ -1,10 +1,17 @@
 import hashlib
+import logging
 import re
 from io import BytesIO
+from pathlib import Path
 
 import pymupdf
 import requests
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Body
+from fastapi.responses import FileResponse, StreamingResponse
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -13,6 +20,11 @@ from backend.services.financial_analysis import calculate_financial_metrics
 from backend.services.financial_extraction import extract_financials
 from backend.services.rag import answer_question
 from backend.services.vector_store import index_chunks, search_chunks
+
+
+logger = logging.getLogger(__name__)
+
+UPLOAD_DIR = Path(__file__).resolve().parent.parent / "data" / "uploads"
 
 
 app = FastAPI(
@@ -73,6 +85,7 @@ def financial_analysis(request: FinancialAnalysisRequest):
     try:
         return calculate_financial_metrics(financials)
     except (TypeError, ValueError) as exc:
+        logger.warning("Invalid financial-analysis input: %s", exc)
         raise HTTPException(
             status_code=400,
             detail=f"Could not calculate financial metrics: {exc}",
@@ -85,7 +98,11 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
     ],
+    # Accept Vite's changing local dev ports without opening credentialed CORS.
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -201,6 +218,13 @@ async def extract_pdf(file: UploadFile = File(...)):
             )
             indexed_count = index_chunks(chunks)
 
+            # Retain the original PDF so users can download the exact source
+            # report later. The SHA-256 filename avoids trusting upload names.
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            stored_pdf = UPLOAD_DIR / f"{document_id}.pdf"
+            if not stored_pdf.exists():
+                stored_pdf.write_bytes(pdf_bytes)
+
     except RuntimeError as exc:
         raise HTTPException(
             status_code=503,
@@ -227,6 +251,172 @@ async def extract_pdf(file: UploadFile = File(...)):
         "chunks": chunks,
         "indexed_count": indexed_count,
     }
+
+
+@app.get("/documents/{document_id}/download")
+def download_original_document(document_id: str, filename: str | None = Query(default=None, max_length=255)):
+    document_id = validate_document_id(document_id)
+    pdf_path = UPLOAD_DIR / f"{document_id}.pdf"
+
+    if not pdf_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Original PDF is not available on this server. Upload the report again to enable downloading.",
+        )
+
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=Path(filename).name if filename and Path(filename).name.lower().endswith(".pdf") else f"{document_id}.pdf",
+    )
+
+
+@app.post("/financial-analysis/report")
+def download_financial_analysis_report(payload: dict = Body(...)):
+    """Generate a portable PDF summary of extracted financials and their evidence."""
+    from io import BytesIO
+    from xml.sax.saxutils import escape
+    from reportlab.graphics.shapes import Drawing, String, Rect, Line
+
+    financials = payload.get("financials") or {}
+    evidence = payload.get("evidence") or {}
+    analysis = (payload.get("analysis") or {}).get("metrics") or {}
+    if not isinstance(financials, dict) or not financials:
+        raise HTTPException(status_code=400, detail="No financial figures are available to export.")
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=42, leftMargin=42, topMargin=42, bottomMargin=42)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph("FinOpera — Financial Analysis Report", styles["Title"]),
+        Spacer(1, 8),
+        Paragraph(f"Source: {escape(str(payload.get('filename') or 'Uploaded report'))}", styles["Normal"]),
+        Paragraph(f"Reporting period: {escape(str(payload.get('reporting_period') or 'Not identified'))}", styles["Normal"]),
+        Paragraph(f"Currency: {escape(str(payload.get('currency') or 'Unspecified'))} · Units: {escape(str(payload.get('units') or 'Unspecified'))}", styles["Normal"]),
+        Paragraph(f"Extraction status: {escape(str(payload.get('extraction_status') or 'unknown'))}", styles["Normal"]),
+        Spacer(1, 14),
+        Paragraph("Visual analysis", styles["Heading2"]),
+    ]
+
+    def add_bar_chart(title, items, percent=False):
+        available = [
+            (label, float(financials[key]))
+            for label, key in items
+            if isinstance(financials.get(key), (int, float))
+            and not isinstance(financials.get(key), bool)
+        ]
+        if len(available) < 2:
+            return
+        width = 500
+        row_height = 24
+        height = 42 + row_height * len(available)
+        drawing = Drawing(width, height)
+        drawing.add(String(0, height - 12, title, fontName="Helvetica-Bold", fontSize=9, fillColor=colors.HexColor("#243047")))
+        label_width = 132
+        plot_left = label_width
+        plot_width = width - label_width - 12
+        values = [value for _, value in available]
+        low = min(0.0, min(values))
+        high = max(0.0, max(values))
+        span = high - low
+        if span == 0:
+            span = 1.0
+        scale = plot_width / span
+        zero_x = plot_left + (0 - low) * scale
+        drawing.add(Line(zero_x, 10, zero_x, height - 24, strokeColor=colors.HexColor("#94A3B8"), strokeWidth=0.7))
+        for index, (label, value) in enumerate(available):
+            y = height - 34 - index * row_height
+            drawing.add(String(0, y + 3, label[:23], fontName="Helvetica", fontSize=7, fillColor=colors.HexColor("#334155")))
+            value_x = plot_left + (value - low) * scale
+            bar_x = min(zero_x, value_x)
+            bar_width = max(1, abs(value_x - zero_x))
+            drawing.add(Rect(bar_x, y, bar_width, 11, fillColor=colors.HexColor("#38A3A5"), strokeColor=None))
+            shown = f"{value:,.2f}%" if percent else f"{value:,.2f}"
+            text_x = min(width - 62, value_x + 4) if value >= 0 else max(plot_left, value_x - 54)
+            drawing.add(String(text_x, y + 2, shown, fontName="Helvetica", fontSize=6.5, fillColor=colors.HexColor("#243047")))
+        story.append(drawing)
+        story.append(Spacer(1, 8))
+
+    add_bar_chart("Core income statement figures", [
+        ("Revenue", "revenue"),
+        ("Operating income", "operating_income"),
+        ("Net income", "net_income"),
+    ])
+    add_bar_chart("Core balance sheet figures", [
+        ("Current assets", "current_assets"),
+        ("Current liabilities", "current_liabilities"),
+        ("Total debt", "total_debt"),
+        ("Total equity", "total_equity"),
+        ("Total assets", "total_assets"),
+    ])
+    ratio_values = [
+        (key.replace("_", " ").title(), float(value))
+        for key, value in analysis.items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    ]
+    if len(ratio_values) >= 2:
+        width, row_height = 500, 24
+        height = 42 + row_height * len(ratio_values)
+        drawing = Drawing(width, height)
+        drawing.add(String(0, height - 12, "Calculated ratios", fontName="Helvetica-Bold", fontSize=9, fillColor=colors.HexColor("#243047")))
+        label_width, plot_width = 190, 298
+        values = [value for _, value in ratio_values]
+        low, high = min(0.0, min(values)), max(0.0, max(values))
+        span = max(1.0, high - low)
+        scale = plot_width / span
+        zero_x = label_width + (0 - low) * scale
+        drawing.add(Line(zero_x, 10, zero_x, height - 24, strokeColor=colors.HexColor("#94A3B8"), strokeWidth=0.7))
+        for index, (label, value) in enumerate(ratio_values):
+            y = height - 34 - index * row_height
+            drawing.add(String(0, y + 3, label[:30], fontName="Helvetica", fontSize=7, fillColor=colors.HexColor("#334155")))
+            value_x = label_width + (value - low) * scale
+            drawing.add(Rect(min(zero_x, value_x), y, max(1, abs(value_x - zero_x)), 11, fillColor=colors.HexColor("#6477C8"), strokeColor=None))
+            drawing.add(String(min(width - 48, value_x + 4) if value >= 0 else max(label_width, value_x - 42), y + 2, f"{value:,.2f}", fontName="Helvetica", fontSize=6.5, fillColor=colors.HexColor("#243047")))
+        story.append(drawing)
+        story.append(Spacer(1, 10))
+
+    story.append(Paragraph(
+        "Charts include only extracted numeric values; unavailable fields are omitted, not treated as zero.",
+        styles["Italic"],
+    ))
+    story.append(Spacer(1, 10))
+
+    rows = [["Statement field", "Value", "Evidence"]]
+    for field, value in financials.items():
+        if field in {"currency", "units", "reporting_period"}:
+            continue
+        ref = evidence.get(field) if isinstance(evidence.get(field), dict) else {}
+        source = "Calculated" if str(ref.get("type", "")).startswith("calculated") else (
+            f"{ref.get('filename') or payload.get('filename') or 'Source'} · p. {ref.get('page')}"
+            if ref.get("page") else "Not available in extracted evidence"
+        )
+        rows.append([field.replace("_", " ").title(), "—" if value is None else str(value), source])
+    table = Table(rows, colWidths=[155, 115, 205], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#243047")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#CBD5E1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F1F5F9")]),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.extend([table, Spacer(1, 16), Paragraph("Calculated ratios", styles["Heading2"])])
+    ratio_rows = [["Metric", "Value"]] + [[key.replace("_", " ").title(), "—" if value is None else str(value)] for key, value in analysis.items()]
+    if len(ratio_rows) > 1:
+        ratios = Table(ratio_rows, colWidths=[235, 235], repeatRows=1)
+        ratios.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#243047")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#CBD5E1")),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("PADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(ratios)
+    story.extend([Spacer(1, 18), Paragraph("Important: Model-assisted extraction. Verify material figures against the original PDF before relying on them.", styles["Italic"])])
+    doc.build(story)
+    buffer.seek(0)
+    return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="finopera-financial-analysis.pdf"'})
 
 
 @app.post("/search")
@@ -256,16 +446,26 @@ def financial_extract_endpoint(
             filename=filename,
         )
     except requests.RequestException as exc:
-        print(f"Financial extraction HTTP error: {exc!r}")
+        logger.exception("Financial extraction dependency request failed")
         raise HTTPException(
             status_code=502,
-            detail=f"Financial extraction request failed: {exc}",
+            detail="The financial extraction provider could not be reached. Please try again.",
         ) from exc
+    except RuntimeError as exc:
+        logger.exception("Financial extraction could not complete")
+        message = str(exc)
+        status_code = 503 if "GEMINI_API_KEY is missing" in message else 502
+        detail = (
+            "Financial extraction is not configured. Add GEMINI_API_KEY to the backend environment."
+            if status_code == 503
+            else "The financial extraction provider could not complete the request. Please retry."
+        )
+        raise HTTPException(status_code=status_code, detail=detail) from exc
     except (ValueError, KeyError) as exc:
-        print(f"Financial extraction parsing error: {exc!r}")
+        logger.exception("Financial extraction response validation failed")
         raise HTTPException(
             status_code=502,
-            detail=f"Could not parse extraction response: {exc}",
+            detail="The financial extraction provider returned an invalid response.",
         ) from exc
 
 
@@ -276,10 +476,33 @@ def analyze_financial_document(
 ):
     document_id = validate_document_id(document_id)
 
-    extraction = extract_financials(
-        document_id=document_id,
-        filename=filename,
-    )
+    try:
+        extraction = extract_financials(
+            document_id=document_id,
+            filename=filename,
+        )
+    except requests.RequestException as exc:
+        logger.exception("Financial analysis dependency request failed")
+        raise HTTPException(
+            status_code=502,
+            detail="The financial extraction provider could not be reached. Please try again.",
+        ) from exc
+    except RuntimeError as exc:
+        logger.exception("Financial analysis extraction failed")
+        message = str(exc)
+        status_code = 503 if "GEMINI_API_KEY is missing" in message else 502
+        detail = (
+            "Financial extraction is not configured. Add GEMINI_API_KEY to the backend environment."
+            if status_code == 503
+            else "The financial extraction provider could not complete the request. Please retry."
+        )
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except (ValueError, KeyError) as exc:
+        logger.exception("Financial analysis extraction response was invalid")
+        raise HTTPException(
+            status_code=502,
+            detail="The financial extraction provider returned an invalid response.",
+        ) from exc
 
     if not extraction.get("sources"):
         raise HTTPException(
@@ -296,9 +519,12 @@ def analyze_financial_document(
     return {
         "document_id": document_id,
         "message": (
-            "Financial analysis completed. "
-            "Verify figures against the source."
+            extraction.get("message")
+            or "Financial analysis completed. Verify figures against the source."
         ),
+        "extraction_status": extraction.get("extraction_status", "completed"),
+        "statement_errors": extraction.get("statement_errors", {}),
+        "verified_fields": extraction.get("verified_fields", []),
         "financials": financials,
         "analysis": analysis,
         "evidence": extraction.get("evidence", {}),
@@ -333,4 +559,20 @@ def ask_question_endpoint(request: AskRequest):
         raise HTTPException(
             status_code=400,
             detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        logger.exception("Document question answering failed")
+        message = str(exc)
+        status_code = 503 if "GEMINI_API_KEY is missing" in message else 502
+        detail = (
+            "AI Analyst is not configured. Add GEMINI_API_KEY to the backend environment."
+            if status_code == 503
+            else "AI Analyst could not complete the request. Please try again."
+        )
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except requests.RequestException as exc:
+        logger.exception("AI Analyst dependency request failed")
+        raise HTTPException(
+            status_code=502,
+            detail="AI Analyst could not reach its provider. Please try again.",
         ) from exc

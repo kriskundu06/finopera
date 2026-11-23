@@ -1,6 +1,7 @@
 
 
 import { useRef, useState } from 'react'
+import { CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 import {
 
@@ -10,11 +11,9 @@ import {
 
   Info,
 
-  Wallet,
 
   Landmark,
 
-  TrendingUp,
 
   ArrowDownRight,
 
@@ -37,6 +36,7 @@ import {
   Menu,
 
   Send,
+  Settings,
 
   Bot,
 
@@ -45,10 +45,10 @@ import {
   LoaderCircle,
 
   ExternalLink,
+  Download,
 
   ShieldAlert,
 
-  ShieldCheck,
 
   Upload,
 
@@ -57,14 +57,11 @@ import {
 } from 'lucide-react'
 
 const navigation = [
-
-  { label: 'Overview', icon: LayoutDashboard },
-
-  { label: 'Financial analysis', icon: ChartNoAxesCombined },
-
-
-  { label: 'Ask AI', icon: FileSearch },
-
+  { label: 'Dashboard', page: 'Overview', icon: LayoutDashboard },
+  { label: 'Documents', page: 'Documents', icon: FileText },
+  { label: 'AI Analyst', page: 'Ask AI', icon: Bot },
+  { label: 'Financial Statements', page: 'Financial analysis', icon: ChartNoAxesCombined },
+  { label: 'Settings', page: 'Settings', icon: Settings },
 ]
 
 const metrics = [
@@ -135,9 +132,23 @@ const metrics = [
 
 ]
 
+type EvidenceReference = {
+  filename?: string
+  page?: number
+  quote?: string
+  type?: string
+  formula?: string
+}
+
 type FinancialAnalysisResponse = {
 
   message?: string
+
+  extraction_status?: 'completed' | 'partial' | 'failed' | 'no_evidence'
+
+  statement_errors?: Record<string, string>
+
+  verified_fields?: string[]
 
   financials?: Record<string, number | string | null | undefined>
 
@@ -153,7 +164,7 @@ type FinancialAnalysisResponse = {
 
   }
 
-  evidence?: Record<string, any>
+  evidence?: Record<string, EvidenceReference | null | undefined>
 
   sources?: Array<{ source?: string; page?: number }>
 
@@ -263,11 +274,17 @@ function App() {
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
   const [isAnalyzing, setIsAnalyzing] = useState(false)
 
   const [uploadError, setUploadError] = useState('')
 
   const [uploadMessage, setUploadMessage] = useState('')
+
+  const [isExporting, setIsExporting] = useState(false)
+
+  const [exportError, setExportError] = useState('')
 
   const [documentInfo, setDocumentInfo] = useState<{
     filename: string
@@ -344,7 +361,7 @@ function App() {
 
       if (!uploadResponse.ok) throw new Error(uploadPayload.detail || `PDF upload failed (${uploadResponse.status}).`)
 
-      if (uploadPayload.ocr_required) throw new Error('This PDF contains no selectable text. OCR is not enabled for this document yet.')
+      const ocrWarning = uploadPayload.ocr_required ? ' Some image-based pages could not be read; review page coverage before relying on extracted figures.' : ''
 
       if (typeof uploadPayload.document_id !== 'string' || !uploadPayload.document_id) {
         throw new Error('The backend did not return a document ID. Please update the backend and try uploading again.')
@@ -358,7 +375,7 @@ function App() {
 
       setUploadMessage('PDF indexed. Extracting financial figures and calculating ratios…')
 
-      const analysisResponse = await fetch(`${API_BASE_URL}/financial-analyze-document?filename=${encodeURIComponent(uploadPayload.filename || selectedFile.name)}`,{ method: 'POST' })
+      const analysisResponse = await fetch(`${API_BASE_URL}/financial-analyze-document?document_id=${encodeURIComponent(uploadPayload.document_id)}&filename=${encodeURIComponent(uploadPayload.filename || selectedFile.name)}`,{ method: 'POST' })
 
       const analysisPayload = await analysisResponse.json().catch(() => ({}))
 
@@ -366,7 +383,7 @@ function App() {
 
       setFinancialResult(analysisPayload)
 
-      setUploadMessage('Analysis complete. Dashboard metrics now use the uploaded report.')
+      setUploadMessage('Analysis complete. Dashboard metrics now use the uploaded report.' + ocrWarning)
 
       setActivePage('Financial analysis')
 
@@ -378,6 +395,55 @@ function App() {
 
     } finally { setIsAnalyzing(false) }
 
+  }
+
+  function downloadOriginalPdf() {
+    if (!documentInfo?.document_id) return
+    const link = document.createElement('a')
+    link.href = `${API_BASE_URL}/documents/${encodeURIComponent(documentInfo.document_id)}/download?filename=${encodeURIComponent(documentInfo.filename || 'original-report.pdf')}`
+    link.download = documentInfo.filename || 'original-report.pdf'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  async function downloadAnalysisPdf() {
+    if (!financialResult || !documentInfo || isExporting) return
+    setIsExporting(true)
+    setExportError('')
+    try {
+      const response = await fetch(`${API_BASE_URL}/financial-analysis/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: documentInfo.filename,
+          reporting_period: financialResult.reporting_period,
+          currency,
+          units,
+          extraction_status: financialResult.extraction_status,
+          financials,
+          evidence: financialResult.evidence,
+          analysis: financialResult.analysis,
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.detail || 'Could not generate the analysis PDF.')
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'finopera-financial-analysis.pdf'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'Could not download the analysis PDF.')
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   async function askQuestion(questionOverride?: string) {
@@ -393,7 +459,7 @@ function App() {
 
     const userMessage: ChatMessage = {
 
-      id: `${Date.now()}-user`,
+      id: `user-${chatMessages.length}`,
 
       role: 'user',
 
@@ -447,7 +513,7 @@ function App() {
 
         {
 
-          id: `${Date.now()}-assistant`,
+          id: `assistant-${chatMessages.length}`,
 
           role: 'assistant',
 
@@ -477,19 +543,29 @@ function App() {
 
   const analysis = financialResult?.analysis?.metrics ?? {}
 
+  const currentPageLabel = navigation.find((item) => item.page === activePage)?.label ?? activePage
+
+  const statementLineData = [
+    { name: 'Revenue', value: financials.revenue },
+    { name: 'Gross profit', value: financials.gross_profit },
+    { name: 'Operating income', value: financials.operating_income },
+    { name: 'Net income', value: financials.net_income },
+  ].filter((point): point is { name: string; value: number } => typeof point.value === 'number' && Number.isFinite(point.value))
+
+
   const currency = financialResult?.currency || String(financials.currency || 'USD')
 
   const units = financialResult?.units || String(financials.units || 'millions')
 
   const metricCards = [
 
-    { ...metrics[0], value: financialResult ? formatAmount(financials.revenue, currency, units) : metrics[0].value, change: financialResult ? 'From report' : metrics[0].change, note: financialResult ? 'Reported revenue' : metrics[0].note },
+    { ...metrics[0], value: financialResult ? formatAmount(financials.revenue, currency, units) : '—', change: financialResult ? 'From report' : 'Awaiting report', note: financialResult ? 'Reported revenue' : 'Upload a report to populate' },
 
-    { ...metrics[1], value: financialResult ? formatPercent(analysis.net_profit_margin) : metrics[1].value, change: financialResult ? 'Calculated' : metrics[1].change, note: financialResult ? 'Net income / revenue' : metrics[1].note },
+    { ...metrics[1], value: financialResult ? formatPercent(analysis.net_profit_margin) : '—', change: financialResult ? 'Calculated' : 'Awaiting report', note: financialResult ? 'Net income / revenue' : 'Upload a report to populate' },
 
-    { ...metrics[2], value: financialResult ? formatRatio(analysis.current_ratio) : metrics[2].value, change: financialResult ? 'Calculated' : metrics[2].change, note: financialResult ? 'Current assets / liabilities' : metrics[2].note },
+    { ...metrics[2], value: financialResult ? formatRatio(analysis.current_ratio) : '—', change: financialResult ? 'Calculated' : 'Awaiting report', note: financialResult ? 'Current assets / liabilities' : 'Upload a report to populate' },
 
-    { ...metrics[3], value: financialResult ? formatAmount(financials.total_debt, currency, units) : metrics[3].value, change: financialResult ? `D/E ${formatRatio(analysis.debt_to_equity)}` : metrics[3].change, note: financialResult ? 'Reported total debt' : metrics[3].note },
+    { ...metrics[3], value: financialResult ? formatAmount(financials.total_debt, currency, units) : '—', change: financialResult ? `D/E ${formatRatio(analysis.debt_to_equity)}` : 'Awaiting report', note: financialResult ? 'Reported total debt' : 'Upload a report to populate' },
 
   ]
 
@@ -508,6 +584,8 @@ function App() {
         page: typeof item.page === 'number' ? item.page : null,
 
         quote: typeof item.quote === 'string' ? item.quote : null,
+        type: typeof item.type === 'string' ? item.type : undefined,
+        formula: typeof item.formula === 'string' ? item.formula : undefined,
 
       }
 
@@ -516,152 +594,6 @@ function App() {
     return null
 
   }
-
-  const riskIndicators = [
-
-    {
-
-      key: 'liquidity',
-
-      title: 'Short-term liquidity',
-
-      icon: Wallet,
-
-      value: analysis.current_ratio,
-
-      display: formatRatio(analysis.current_ratio),
-
-      formula: 'Current assets ÷ current liabilities',
-
-      field: 'current_assets',
-
-      secondaryField: 'current_liabilities',
-
-      status: typeof analysis.current_ratio !== 'number' ? 'Unavailable' : analysis.current_ratio < 1 ? 'Attention' : analysis.current_ratio < 1.5 ? 'Review' : 'Lower concern',
-
-      level: typeof analysis.current_ratio !== 'number' ? 'neutral' : analysis.current_ratio < 1 ? 'high' : analysis.current_ratio < 1.5 ? 'medium' : 'low',
-
-      explanation: typeof analysis.current_ratio !== 'number' ? 'The current ratio could not be calculated from the available figures.' : analysis.current_ratio < 1 ? 'Current liabilities exceed current assets in this report. Review near-term liquidity and cash availability.' : analysis.current_ratio < 1.5 ? 'The ratio is above 1, but the liquidity buffer may warrant closer review in the company’s industry context.' : 'Current assets exceed current liabilities by a comfortable margin under this simple screening threshold. This alone does not guarantee liquidity.',
-
-    },
-
-    {
-
-      key: 'leverage',
-
-      title: 'Debt relative to equity',
-
-      icon: Landmark,
-
-      value: analysis.debt_to_equity,
-
-      display: formatRatio(analysis.debt_to_equity),
-
-      formula: 'Total debt ÷ total equity',
-
-      field: 'total_debt',
-
-      secondaryField: 'total_equity',
-
-      status: typeof analysis.debt_to_equity !== 'number' ? 'Unavailable' : analysis.debt_to_equity > 1 ? 'Attention' : analysis.debt_to_equity > 0.5 ? 'Review' : 'Lower concern',
-
-      level: typeof analysis.debt_to_equity !== 'number' ? 'neutral' : analysis.debt_to_equity > 1 ? 'high' : analysis.debt_to_equity > 0.5 ? 'medium' : 'low',
-
-      explanation: typeof analysis.debt_to_equity !== 'number' ? 'Debt-to-equity could not be calculated from the available figures.' : analysis.debt_to_equity > 1 ? 'Reported debt exceeds equity. Review debt maturities, interest costs, and the company’s ability to service obligations.' : analysis.debt_to_equity > 0.5 ? 'Debt is material relative to equity under this screening threshold. Compare with peers and debt maturities before drawing a conclusion.' : 'Reported debt is relatively low compared with equity under this screening threshold. This does not assess debt terms or future commitments.',
-
-    },
-
-    {
-
-      key: 'asset-leverage',
-
-      title: 'Debt relative to assets',
-
-      icon: BriefcaseBusiness,
-
-      value: analysis.debt_to_assets,
-
-      display: formatRatio(analysis.debt_to_assets),
-
-      formula: 'Total debt ÷ total assets',
-
-      field: 'total_debt',
-
-      secondaryField: 'total_assets',
-
-      status: typeof analysis.debt_to_assets !== 'number' ? 'Unavailable' : analysis.debt_to_assets > 0.5 ? 'Attention' : analysis.debt_to_assets > 0.3 ? 'Review' : 'Lower concern',
-
-      level: typeof analysis.debt_to_assets !== 'number' ? 'neutral' : analysis.debt_to_assets > 0.5 ? 'high' : analysis.debt_to_assets > 0.3 ? 'medium' : 'low',
-
-      explanation: typeof analysis.debt_to_assets !== 'number' ? 'Debt-to-assets could not be calculated from the available figures.' : analysis.debt_to_assets > 0.5 ? 'Debt represents a substantial share of reported assets under this screening threshold. Review asset quality and repayment obligations.' : analysis.debt_to_assets > 0.3 ? 'The debt share of assets merits context from the company’s industry, cash flows, and debt terms.' : 'Reported debt represents a relatively small share of assets under this screening threshold; asset quality and off-balance-sheet commitments are not captured.',
-
-    },
-
-    {
-
-      key: 'cash-conversion',
-
-      title: 'Cash conversion',
-
-      icon: Activity,
-
-      value: analysis.operating_cash_flow_to_net_income,
-
-      display: formatRatio(analysis.operating_cash_flow_to_net_income),
-
-      formula: 'Operating cash flow ÷ net income',
-
-      field: 'operating_cash_flow',
-
-      secondaryField: 'net_income',
-
-      status: typeof analysis.operating_cash_flow_to_net_income !== 'number' ? 'Unavailable' : analysis.operating_cash_flow_to_net_income < 0.5 ? 'Attention' : analysis.operating_cash_flow_to_net_income < 1 ? 'Review' : 'Lower concern',
-
-      level: typeof analysis.operating_cash_flow_to_net_income !== 'number' ? 'neutral' : analysis.operating_cash_flow_to_net_income < 0.5 ? 'high' : analysis.operating_cash_flow_to_net_income < 1 ? 'medium' : 'low',
-
-      explanation: typeof analysis.operating_cash_flow_to_net_income !== 'number' ? 'Cash conversion could not be calculated from the available figures.' : analysis.operating_cash_flow_to_net_income < 0.5 ? 'Operating cash flow is much lower than net income for this period. Investigate working-capital movements and non-cash earnings.' : analysis.operating_cash_flow_to_net_income < 1 ? 'Operating cash flow is below net income for this period. This can have several causes; compare periods and review working-capital changes.' : 'Operating cash flow equals or exceeds net income for this period. Check whether this pattern is sustained across reporting periods.',
-
-    },
-
-    {
-
-      key: 'free-cash-flow',
-
-      title: 'Free cash flow',
-
-      icon: TrendingUp,
-
-      value: analysis.free_cash_flow,
-
-      display: formatAmount(analysis.free_cash_flow, currency, units),
-
-      formula: 'Operating cash flow − capital expenditure',
-
-      field: 'operating_cash_flow',
-
-      secondaryField: 'capital_expenditure',
-
-      status: typeof analysis.free_cash_flow !== 'number' ? 'Unavailable' : analysis.free_cash_flow < 0 ? 'Attention' : 'Positive',
-
-      level: typeof analysis.free_cash_flow !== 'number' ? 'neutral' : analysis.free_cash_flow < 0 ? 'high' : 'low',
-
-      explanation: typeof analysis.free_cash_flow !== 'number' ? 'Free cash flow could not be calculated from the available figures.' : analysis.free_cash_flow < 0 ? 'Capital expenditure exceeded operating cash flow in this period. Review investment plans and financing needs.' : 'Free cash flow is positive for this period after capital expenditure. One period alone does not establish a trend.',
-
-    },
-
-  ] as const
-
-  const riskLevelClasses = {
-
-    low: 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-300',
-
-    medium: 'border-amber-400/20 bg-amber-400/[0.06] text-amber-300',
-
-    high: 'border-rose-400/20 bg-rose-400/[0.06] text-rose-300',
-
-    neutral: 'border-white/[0.08] bg-white/[0.03] text-slate-400',
-
-  } as const
 
   return (
 
@@ -683,7 +615,7 @@ function App() {
 
       <aside
 
-        className={`fixed inset-y-0 left-0 z-40 flex w-[252px] flex-col border-r border-white/[0.07] bg-[#0d1220] transition-transform duration-200 ${
+        className={`fixed inset-y-0 left-0 z-40 flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[252px]'} flex-col border-r border-white/[0.07] bg-[#0d1220] transition-transform duration-200 ${
 
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
 
@@ -691,7 +623,7 @@ function App() {
 
       >
 
-        <div className="flex h-[76px] items-center gap-3 border-b border-white/[0.07] px-6">
+        <div className={`flex h-[76px] items-center gap-3 border-b border-white/[0.07] ${sidebarCollapsed ? 'justify-center px-2' : 'px-6'}`}>
 
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-500/15 text-lime-400">
 
@@ -699,13 +631,13 @@ function App() {
 
           </div>
 
-          <div>
+          {!sidebarCollapsed && <div>
 
             <p className="text-[15px] font-semibold tracking-tight text-white">FinOpera</p>
 
             <p className="mt-0.5 text-xs text-slate-500">RAG-Powered Due Diligence</p>
 
-          </div>
+          </div>}
 
           <button
 
@@ -725,17 +657,17 @@ function App() {
 
         <div className="px-4 pt-7">
 
-          <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.19em] text-slate-600">
+          {!sidebarCollapsed && <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.19em] text-slate-600">
 
             Workspace
 
-          </p>
+          </p>}
 
           <nav className="space-y-1">
 
-            {navigation.map(({ label, icon: Icon }) => {
+            {navigation.map(({ label, page: pageKey, icon: Icon }) => {
 
-              const active = activePage === label
+              const active = activePage === pageKey
 
               return (
 
@@ -745,13 +677,13 @@ function App() {
 
                   onClick={() => {
 
-                    setActivePage(label)
+                    setActivePage(pageKey)
 
                     setMobileMenuOpen(false)
 
                   }}
 
-                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[13px] transition ${
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[13px] transition ${sidebarCollapsed ? 'justify-center px-2' : ''} ${
 
                     active
 
@@ -763,13 +695,13 @@ function App() {
 
                 >
 
-                  <Icon size={18} strokeWidth={1.8} />
+                  <Icon className="shrink-0" size={18} strokeWidth={1.8} />
 
-                  <span>{label}</span>
+                  {!sidebarCollapsed && <span className="min-w-0 truncate">{label}</span>}
 
-                  {label === 'Ask AI' && (
+                  {label === 'AI Analyst' && !sidebarCollapsed && (
 
-                    <span className="ml-auto rounded-md bg-lime-500/20 px-2 py-0.5 text-[10px] text-lime-300">
+                    <span className="ml-auto shrink-0 rounded-md bg-lime-500/20 px-2 py-0.5 text-[10px] text-lime-300">
 
                       AI
 
@@ -793,15 +725,15 @@ function App() {
 
             onClick={() => {
 
-              setActivePage('Help & documentation')
+              setActivePage('Settings')
 
               setMobileMenuOpen(false)
 
             }}
 
-            className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition ${
+            className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition ${sidebarCollapsed ? 'justify-center px-2' : ''} ${
 
-              activePage === 'Help & documentation'
+              activePage === 'Settings'
 
                 ? 'bg-lime-500/15 font-medium text-lime-300'
 
@@ -811,25 +743,25 @@ function App() {
 
           >
 
-            <CircleHelp size={18} />
+            <CircleHelp className="shrink-0" size={18} />
 
-            Help & documentation
+            {!sidebarCollapsed && <span className="min-w-0 truncate">Settings</span>}
 
           </button>
 
-          <div className="mt-2 border-t border-white/[0.07] pt-4">
+          {!sidebarCollapsed && <div className="mt-2 border-t border-white/[0.07] pt-4">
 
             <p className="text-xs text-slate-600">FinOpera</p>
 
-            <p className="mt-1 text-[10px] text-slate-700">RAG-Powered Due Diligence Platform · v1.0</p>
+            <p className="mt-1 text-[10px] leading-4 text-slate-700">RAG-Powered Due Diligence Platform · v1.0</p>
 
-          </div>
+          </div>}
 
         </div>
 
       </aside>
 
-      <div className="min-h-screen lg:pl-[252px]">
+      <div className={`min-h-screen ${sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[252px]'}`}>
 
         <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-white/[0.07] bg-[#090d18]/90 px-5 backdrop-blur-xl sm:px-8">
 
@@ -837,9 +769,9 @@ function App() {
 
             <button
 
-              className="rounded-lg p-2 text-slate-400 hover:bg-white/5 lg:hidden"
+              className="rounded-lg p-2 text-slate-400 hover:bg-white/5"
 
-              onClick={() => setMobileMenuOpen(true)}
+              onClick={() => { if (window.innerWidth < 1024) setMobileMenuOpen(true); else setSidebarCollapsed(value => !value) }}
 
               aria-label="Open menu"
 
@@ -855,13 +787,13 @@ function App() {
 
                 Workspace <span>/</span>
 
-                <span className="text-slate-300">{activePage}</span>
+                <span className="text-slate-300">{currentPageLabel}</span>
 
               </div>
 
               <h1 className="mt-1 truncate text-base font-semibold text-white">
 
-                {activePage}
+                {currentPageLabel}
 
               </h1>
 
@@ -875,7 +807,7 @@ function App() {
 
         <main className="mx-auto max-w-[1600px] space-y-7 px-5 py-7 sm:px-8 sm:py-9">
 
-          {activePage === 'Help & documentation' ? (
+          {activePage === 'Settings' ? (
 
             <section className="mx-auto w-full max-w-5xl space-y-7">
 
@@ -889,7 +821,7 @@ function App() {
 
                 </div>
 
-                <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Help & documentation</h2>
+                <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Settings</h2>
 
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
 
@@ -911,7 +843,7 @@ function App() {
 
                   </div>
 
-                  <p className="mt-3 text-sm leading-6 text-slate-400">From Overview, choose <strong className="font-medium text-slate-200">Analyze a report</strong> and upload a PDF financial report. FinOpera accepts PDFs up to 20 MB. Use a report with selectable text for the best results; scanned PDFs may not extract reliably.</p>
+                  <p className="mt-3 text-sm leading-6 text-slate-400">From Documents, choose <strong className="font-medium text-slate-200">Analyze a report</strong> and upload a PDF financial report. FinOpera accepts PDFs up to 20 MB. Use a report with selectable text for the best results; scanned PDFs may not extract reliably.</p>
 
                 </article>
 
@@ -963,11 +895,11 @@ function App() {
 
                     <div className="rounded-xl bg-amber-400/10 p-2.5 text-amber-300"><ShieldAlert size={19} /></div>
 
-                    <h3 className="text-sm font-semibold text-white">5. Review risk indicators</h3>
+                    <h3 className="text-sm font-semibold text-white">5. Review extracted figures</h3>
 
                   </div>
 
-                  <p className="mt-3 text-sm leading-6 text-slate-400">Risk assessment presents a preliminary screen of available liquidity, leverage, and cash-generation measures. Indicators are heuristic signals to help direct review—not a validated credit rating or a prediction of default.</p>
+                  <p className="mt-3 text-sm leading-6 text-slate-400">Review extracted statements, source evidence, and calculated ratios before using any figures in a decision.</p>
 
                 </article>
 
@@ -1003,7 +935,7 @@ function App() {
 
                   <li>Results depend on the quality and completeness of the uploaded report and the extraction model.</li>
 
-                  <li>Risk thresholds are screening rules, not a validated risk-prediction model.</li>
+                  <li>Calculated ratios are screening metrics and should be interpreted in business and industry context.</li>
 
                   <li>Do not treat missing values as zero or assume a single reporting period shows a trend.</li>
 
@@ -1021,6 +953,46 @@ function App() {
 
             </section>
 
+
+          ) : activePage === 'Documents' ? (
+            <section className="mx-auto w-full max-w-4xl space-y-6">
+              <div><p className="mb-2 text-[11px] font-semibold uppercase tracking-[.16em] text-lime-300">Document workspace</p><h2 className="text-2xl font-semibold text-white sm:text-3xl">Upload and manage reports</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Upload a PDF to extract its text, index source pages, and calculate financial metrics. Each report is scoped to its content hash.</p></div>
+              <input ref={fileInputRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={(event)=>selectFile(event.target.files?.[0])}/>
+              <button type="button" onClick={()=>fileInputRef.current?.click()} onDragOver={(event)=>{event.preventDefault();setDragging(true)}} onDragLeave={()=>setDragging(false)} onDrop={(event)=>{event.preventDefault();setDragging(false);selectFile(event.dataTransfer.files?.[0])}} className={`flex min-h-[230px] w-full flex-col items-center justify-center rounded-2xl border border-dashed px-6 text-center transition ${dragging?'border-lime-300 bg-lime-300/10':'border-white/15 bg-[#0e1422] hover:border-lime-300/40'}`}><span className="rounded-2xl bg-lime-400/10 p-4 text-lime-300"><Upload size={26}/></span><span className="mt-4 text-sm font-semibold text-white">{selectedFile ? selectedFile.name : 'Drop a financial PDF here'}</span><span className="mt-2 text-xs text-slate-500">{selectedFile ? `${(selectedFile.size/1024/1024).toFixed(2)} MB · Ready to analyze` : 'Click to browse · PDF up to 20 MB'}</span></button>
+              <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-slate-500">Annual reports · Quarterly results · Investor presentations</p><button type="button" onClick={handleUpload} disabled={!selectedFile||isAnalyzing} className="inline-flex items-center gap-2 rounded-xl bg-lime-500 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-lime-400 disabled:cursor-not-allowed disabled:opacity-40">{isAnalyzing?<LoaderCircle size={16} className="animate-spin"/>:<Upload size={16}/>} {isAnalyzing?'Analyzing…':'Upload & analyze'}</button></div>
+              {(uploadError||uploadMessage)&&<div role={uploadError?'alert':'status'} className={`rounded-xl border p-4 text-xs leading-5 ${uploadError?'border-rose-400/20 bg-rose-400/[.05] text-rose-300':'border-lime-400/20 bg-lime-400/[.05] text-lime-100'}`}>{uploadError||uploadMessage}</div>}
+              {documentInfo&&<article className="rounded-2xl border border-white/[.08] bg-[#0e1422] p-5"><div className="flex items-center gap-2 text-sm font-semibold text-white"><FileText size={17} className="text-lime-300"/> Current report</div><p className="mt-3 break-all text-sm text-slate-300">{documentInfo.filename}</p><p className="mt-1 text-xs text-slate-500">{documentInfo.total_pages} pages · {documentInfo.indexed_count} indexed chunks</p><button onClick={()=>setActivePage('Financial analysis')} className="mt-4 text-xs font-medium text-lime-300 hover:text-lime-200">Open extracted statements →</button></article>}
+            </section>
+
+          ) : activePage === 'Financial analysis' ? (
+            <section className="space-y-6">
+              <div><p className="mb-2 text-[11px] font-semibold uppercase tracking-[.16em] text-lime-300">Extracted data</p><h2 className="text-2xl font-semibold text-white sm:text-3xl">Financial statements</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Extracted values are shown with their source page or calculation evidence. Missing values remain blank rather than being treated as zero.</p></div>
+              {!financialResult ? <div className="rounded-2xl border border-dashed border-white/10 bg-[#0e1422] p-10 text-center text-sm text-slate-500">Upload and analyze a report to view its financial statements.</div> : <>
+                <div className="flex flex-wrap gap-3">
+                  <button type="button" onClick={downloadOriginalPdf} disabled={!documentInfo?.document_id} className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2.5 text-xs font-medium text-slate-200 transition hover:border-lime-400/40 hover:bg-white/[.04] disabled:opacity-40"><Download size={15}/> Download original PDF</button>
+                  <button type="button" onClick={downloadAnalysisPdf} disabled={isExporting} className="inline-flex items-center gap-2 rounded-xl bg-lime-500 px-4 py-2.5 text-xs font-medium text-white transition hover:bg-lime-400 disabled:cursor-wait disabled:opacity-60"><FileText size={15}/> {isExporting ? 'Generating PDF…' : 'Export financial analysis'}</button>
+                </div>
+                {exportError && <p role="alert" className="rounded-xl border border-rose-400/20 bg-rose-400/[.06] px-4 py-3 text-xs text-rose-300">{exportError}</p>}
+                <div className={`flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-start sm:justify-between ${financialResult.extraction_status === 'partial' ? 'border-amber-400/25 bg-amber-400/[.06]' : financialResult.extraction_status === 'failed' || financialResult.extraction_status === 'no_evidence' ? 'border-rose-400/25 bg-rose-400/[.06]' : 'border-emerald-400/20 bg-emerald-400/[.05]'}`}>
+                  <div className="flex items-start gap-3">
+                    {financialResult.extraction_status === 'partial' ? <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-300"/> : financialResult.extraction_status === 'failed' || financialResult.extraction_status === 'no_evidence' ? <ShieldAlert size={18} className="mt-0.5 shrink-0 text-rose-300"/> : <Activity size={18} className="mt-0.5 shrink-0 text-emerald-300"/>}
+                    <div><p className="text-sm font-semibold text-white">{financialResult.extraction_status === 'partial' ? 'Partial extraction' : financialResult.extraction_status === 'failed' || financialResult.extraction_status === 'no_evidence' ? 'No verified extraction' : 'Extraction completed'}</p><p className="mt-1 text-xs leading-5 text-slate-300">{financialResult.message || 'Review every figure against the original report.'}</p></div>
+                  </div>
+                  <div className="shrink-0 text-xs text-slate-400">{financialResult.verified_fields?.length ?? 0} verified fields</div>
+                </div>
+                {financialResult.statement_errors && Object.keys(financialResult.statement_errors).length > 0 && <div className="rounded-xl border border-amber-400/20 bg-amber-400/[.04] p-4"><p className="text-xs font-semibold text-amber-200">Statements requiring attention</p><div className="mt-2 flex flex-wrap gap-2">{Object.keys(financialResult.statement_errors).map((statement)=><span key={statement} className="rounded-lg bg-amber-400/10 px-2.5 py-1.5 text-[11px] text-amber-100">{statement.replaceAll('_',' ')}</span>)}</div><p className="mt-2 text-[11px] leading-5 text-slate-400">These sections could not be fully processed. Their figures are intentionally left unavailable.</p></div>}
+                <div className="flex flex-wrap gap-4 text-[11px] text-slate-400"><span className="inline-flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-400"/>Verified with source evidence</span><span className="inline-flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-slate-500"/>Unavailable / not verified</span><span className="inline-flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-sky-400"/>Calculated from verified inputs</span></div>
+                <div className="grid gap-4 sm:grid-cols-3"><article className="rounded-xl border border-white/[.07] bg-[#0e1422] p-4"><p className="text-xs text-slate-500">Reporting period</p><p className="mt-2 text-sm font-medium text-white">{financialResult.reporting_period || 'Not identified'}</p></article><article className="rounded-xl border border-white/[.07] bg-[#0e1422] p-4"><p className="text-xs text-slate-500">Currency</p><p className="mt-2 text-sm font-medium text-white">{currency}</p></article><article className="rounded-xl border border-white/[.07] bg-[#0e1422] p-4"><p className="text-xs text-slate-500">Units</p><p className="mt-2 text-sm font-medium text-white">{units}</p></article></div>
+                <div className="grid gap-5 xl:grid-cols-3">
+                  {[
+                    {title:'Income statement',fields:[['Revenue','revenue'],['Cost of revenue','cost_of_revenue'],['Gross profit','gross_profit'],['Operating income','operating_income'],['Net income','net_income']]},
+                    {title:'Balance sheet',fields:[['Current assets','current_assets'],['Current liabilities','current_liabilities'],['Long-term debt','long_term_debt'],['Total debt','total_debt'],['Total equity','total_equity'],['Total assets','total_assets']]},
+                    {title:'Cash flow statement',fields:[['Operating cash flow','operating_cash_flow'],['Capital expenditure','capital_expenditure']]}
+                  ].map(group=><article key={group.title} className="rounded-2xl border border-white/[.07] bg-[#0e1422] p-5"><h3 className="font-semibold text-white">{group.title}</h3><div className="mt-3 divide-y divide-white/[.06]">{group.fields.map(([label,key])=>{const ref=getEvidenceReference(key);const value=financials[key];const verified=ref!==null;const calculated=ref?.type==='calculated'||ref?.type==='calculated_from_reported_components';return <div key={key} className="py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="text-xs text-slate-300">{label}</span><p className={`mt-1 text-[10px] ${calculated?'text-sky-300':verified?'text-emerald-300':'text-slate-500'}`}>{calculated?'Calculated from verified inputs':verified?'Verified · source evidence':'Unavailable · not verified'}</p></div><strong className="text-right text-sm text-white">{formatAmount(value,currency,units)}</strong></div>{ref&&<details className="mt-2"><summary className="cursor-pointer text-[10px] text-lime-300">{ref.filename || 'Source'} · Page {ref.page ?? '—'}{calculated?' · Calculation evidence':''}</summary>{ref.formula&&<p className="mt-2 text-[11px] text-sky-300">Formula: {ref.formula}</p>}{ref.quote&&<p className="mt-2 whitespace-pre-wrap rounded-lg bg-white/[.03] p-2 text-[11px] leading-5 text-slate-400">{ref.quote}</p>}</details>}</div>})}</div></article>)}
+                </div>
+                <p className="text-[11px] text-slate-600">Extraction is model-assisted. Verify material figures against the original PDF before relying on them.</p>
+              </>}
+            </section>
           ) : activePage === 'Ask AI' ? (
 
             <section className="mx-auto flex w-full max-w-5xl flex-col gap-5">
@@ -1189,274 +1161,6 @@ function App() {
 
             </section>
 
-          ) : activePage === 'Risk assessment' ? (
-
-            <section className="space-y-6">
-
-              <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-
-                <div>
-
-                  <div className="mb-3 flex items-center gap-2">
-
-                    <span className={`h-2 w-2 rounded-full ${financialResult ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-
-                    <span className={`text-[11px] font-medium uppercase tracking-[0.16em] ${financialResult ? 'text-emerald-400' : 'text-amber-300'}`}>
-
-                      {financialResult ? 'Report-specific screening' : 'Awaiting report analysis'}
-
-                    </span>
-
-                  </div>
-
-                  <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Risk assessment</h2>
-
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-
-                    A transparent first-pass review of liquidity, leverage and cash generation using the extracted report figures. Indicators are screening signals, not a credit rating or investment recommendation.
-
-                  </p>
-
-                  {financialResult?.reporting_period && (
-
-                    <p className="mt-2 text-xs text-slate-500">Reporting period: {financialResult.reporting_period}</p>
-
-                  )}
-
-                </div>
-
-                {!financialResult && (
-
-                  <button onClick={() => setActivePage('Overview')} className="inline-flex items-center justify-center gap-2 rounded-xl bg-lime-500 px-4 py-3 text-sm font-medium text-white transition hover:bg-lime-400">
-
-                    <Upload size={16} /> Upload a report
-
-                  </button>
-
-                )}
-
-              </div>
-
-              {!financialResult ? (
-
-                <div className="rounded-2xl border border-white/[0.08] bg-[#0e1422] p-8 text-center">
-
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-lime-400/20 bg-lime-400/10 text-lime-300"><FileSearch size={24} /></div>
-
-                  <h3 className="mt-4 text-base font-semibold text-white">Analyze a report to see risk indicators</h3>
-
-                  <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-400">Risk indicators appear here after FinOpera extracts financial figures. Upload a PDF from the Overview page to get started.</p>
-
-                  <button onClick={() => setActivePage('Overview')} className="mt-5 rounded-xl border border-white/[0.1] px-4 py-2.5 text-sm text-slate-200 transition hover:bg-white/[0.04]">Go to report workspace</button>
-
-                </div>
-
-              ) : (
-
-                <>
-
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-
-                    <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5">
-
-                      <p className="text-xs text-slate-500">Indicators evaluated</p>
-
-                      <p className="mt-3 text-3xl font-semibold text-white">{riskIndicators.filter((item) => item.level !== 'neutral').length}<span className="ml-2 text-sm font-normal text-slate-500">/ {riskIndicators.length}</span></p>
-
-                      <p className="mt-2 text-xs text-slate-500">Based on available figures</p>
-
-                    </article>
-
-                    <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5">
-
-                      <p className="text-xs text-slate-500">Needs attention</p>
-
-                      <p className="mt-3 text-3xl font-semibold text-rose-300">{riskIndicators.filter((item) => item.level === 'high').length}</p>
-
-                      <p className="mt-2 text-xs text-slate-500">Screening flags, not confirmed distress</p>
-
-                    </article>
-
-                    <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5">
-
-                      <p className="text-xs text-slate-500">Review indicators</p>
-
-                      <p className="mt-3 text-3xl font-semibold text-amber-300">{riskIndicators.filter((item) => item.level === 'medium').length}</p>
-
-                      <p className="mt-2 text-xs text-slate-500">Require context or trend comparison</p>
-
-                    </article>
-
-                    <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5">
-
-                      <p className="text-xs text-slate-500">Lower-concern indicators</p>
-
-                      <p className="mt-3 text-3xl font-semibold text-emerald-300">{riskIndicators.filter((item) => item.level === 'low').length}</p>
-
-                      <p className="mt-2 text-xs text-slate-500">Under the configured screening rules</p>
-
-                    </article>
-
-                  </div>
-
-                  <div className="flex items-start gap-3 rounded-xl border border-lime-400/20 bg-lime-400/[0.05] p-4">
-
-                    <Info size={18} className="mt-0.5 shrink-0 text-lime-300" />
-
-                    <p className="text-xs leading-5 text-slate-300">
-
-                      These thresholds are simple, configurable screening rules—not universal standards. Industry, seasonality, accounting policies, debt maturities and multi-period trends can materially change interpretation. Missing values are shown as unavailable rather than guessed.
-
-                    </p>
-
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-
-                    {riskIndicators.map((item) => {
-
-                      const Icon = item.icon
-
-                      const reference = getEvidenceReference(item.field)
-
-                      const secondaryReference = getEvidenceReference(item.secondaryField)
-
-                      return (
-
-                        <article key={item.key} className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
-
-                          <div className="flex items-start gap-3">
-
-                            <div className={`rounded-xl p-2.5 ${item.level === 'low' ? 'bg-emerald-400/10 text-emerald-300' : item.level === 'medium' ? 'bg-amber-400/10 text-amber-300' : item.level === 'high' ? 'bg-rose-400/10 text-rose-300' : 'bg-white/[0.04] text-slate-400'}`}>
-
-                              <Icon size={19} />
-
-                            </div>
-
-                            <div className="min-w-0 flex-1">
-
-                              <h3 className="text-sm font-semibold text-white">{item.title}</h3>
-
-                              <p className="mt-1 text-xs text-slate-500">{item.formula}</p>
-
-                            </div>
-
-                            <span className={`shrink-0 rounded-lg border px-2.5 py-1 text-[10px] font-medium ${riskLevelClasses[item.level]}`}>{item.status}</span>
-
-                          </div>
-
-                          <div className="mt-5 flex items-end justify-between gap-4">
-
-                            <p className="text-3xl font-semibold tracking-tight text-white">{item.display}</p>
-
-                            {item.key === 'free-cash-flow' && <p className="text-right text-[10px] text-slate-500">Currency: {currency}<br />Units: {units}</p>}
-
-                          </div>
-
-                          <p className="mt-3 text-sm leading-6 text-slate-300">{item.explanation}</p>
-
-                          <div className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Reported inputs</p>
-
-                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-300">
-
-                              <span>{item.field.replace(/_/g, ' ')}: {typeof financials[item.field] === 'number' ? formatAmount(financials[item.field], currency, units) : 'Unavailable'}</span>
-
-                              <span>{item.secondaryField.replace(/_/g, ' ')}: {typeof financials[item.secondaryField] === 'number' ? formatAmount(financials[item.secondaryField], currency, units) : 'Unavailable'}</span>
-
-                            </div>
-
-                            {(reference || secondaryReference) && (
-
-                              <div className="mt-3 border-t border-white/[0.06] pt-3">
-
-                                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Source evidence</p>
-
-                                {[{ label: item.field.replace(/_/g, ' '), ref: reference }, { label: item.secondaryField.replace(/_/g, ' '), ref: secondaryReference }].filter((entry) => entry.ref).map((entry) => (
-
-                                  <details key={entry.label} className="group mb-2 last:mb-0">
-
-                                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-2 py-2 text-[11px] text-lime-300 transition hover:bg-white/[0.03]">
-
-                                      <span className="min-w-0 truncate">
-
-                                        {entry.label} · {entry.ref?.filename ?? documentInfo?.filename ?? 'Source document'}
-
-                                        {entry.ref?.page ? ` · Page ${entry.ref.page}` : ''}
-
-                                      </span>
-
-                                      <span className="shrink-0 text-slate-500 group-open:hidden">View quote</span>
-
-                                      <span className="hidden shrink-0 text-slate-500 group-open:inline">Hide quote</span>
-
-                                    </summary>
-
-                                    {entry.ref?.quote && (
-
-                                      <blockquote className="mx-2 mb-2 mt-1 whitespace-pre-wrap rounded-lg border-l-2 border-lime-400/40 bg-white/[0.02] px-3 py-2 text-[11px] leading-5 text-slate-400">
-
-                                        {entry.ref.quote}
-
-                                      </blockquote>
-
-                                    )}
-
-                                  </details>
-
-                                ))}
-
-                              </div>
-
-                            )}
-
-                          </div>
-
-                        </article>
-
-                      )
-
-                    })}
-
-                  </div>
-
-                  <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
-
-                    <div className="flex items-center gap-3">
-
-                      <div className="rounded-xl bg-amber-400/10 p-2.5 text-amber-300"><AlertTriangle size={19} /></div>
-
-                      <div>
-
-                        <h3 className="text-sm font-semibold text-white">Interpretation limits</h3>
-
-                        <p className="mt-1 text-xs text-slate-500">What this first-pass screen does not tell you</p>
-
-                      </div>
-
-                    </div>
-
-                    <ul className="mt-4 list-disc space-y-2 pl-5 text-xs leading-5 text-slate-400">
-
-                      <li>It does not predict default, fraud, stock performance, or future solvency.</li>
-
-                      <li>It does not compare this company against industry peers or prior reporting periods.</li>
-
-                      <li>It may not capture off-balance-sheet commitments, covenant terms, refinancing risk, or qualitative disclosures.</li>
-
-                      <li>Validate each extracted figure and its cited source before using the assessment in a decision.</li>
-
-                    </ul>
-
-                  </article>
-
-                </>
-
-              )}
-
-            </section>
-
           ) : (
 
             <>
@@ -1565,142 +1269,22 @@ function App() {
 
           </section>
 
-          <section className="grid grid-cols-1 gap-5">
 
+          <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
             <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
-
-              <div className="flex items-center justify-between">
-
-                <div>
-
-                  <h3 className="text-sm font-semibold text-white">
-
-                    Risk overview
-
-                  </h3>
-
-                  <p className="mt-1.5 text-xs text-slate-500">
-
-                    Indicators to evaluate
-
-                  </p>
-
+              <h3 className="text-sm font-semibold text-white">Balance sheet composition</h3>
+              <p className="mt-1 text-xs text-slate-500">Equity and liabilities calculated from verified statement values</p>
+              {typeof financials.total_assets === 'number' && financials.total_assets > 0 && typeof financials.total_equity === 'number' && financials.total_equity >= 0 && financials.total_equity <= financials.total_assets ? (
+                <div className="grid grid-cols-1 items-center gap-3 sm:grid-cols-2">
+                  <div className="h-[210px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={[{name:'Equity',value:financials.total_equity},{name:'Liabilities',value:financials.total_assets-financials.total_equity}]} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={4}>{[0,1].map(i=><Cell key={i} fill={['#a3e635','#38bdf8'][i]}/>)}</Pie><Tooltip formatter={(v)=>formatAmount(Number(v),currency,units)}/></PieChart></ResponsiveContainer></div>
+                  <div className="space-y-3 text-xs text-slate-400"><p><span className="mr-2 inline-block h-2 w-2 rounded-full bg-lime-300"/>Equity <strong className="float-right text-white">{formatAmount(financials.total_equity,currency,units)}</strong></p><p><span className="mr-2 inline-block h-2 w-2 rounded-full bg-sky-400"/>Liabilities <strong className="float-right text-white">{formatAmount(financials.total_assets-financials.total_equity,currency,units)}</strong></p></div>
                 </div>
-
-                <ShieldAlert size={19} className="text-amber-400" />
-
-              </div>
-
-              <div className="mt-6 space-y-3">
-
-                <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-
-                  <div className="flex items-center gap-3">
-
-                    <div className="rounded-lg bg-emerald-400/10 p-2 text-emerald-400">
-
-                      <ShieldCheck size={17} />
-
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-
-                      <p className="text-xs font-medium text-slate-200">
-
-                        Liquidity
-
-                      </p>
-
-                      <p className="mt-1 text-[11px] text-slate-500">
-
-                        Current ratio: {financialResult ? formatRatio(analysis.current_ratio) : '1.92×'}
-
-                      </p>
-
-                    </div>
-
-                    <span className="text-[10px] text-emerald-400">Review</span>
-
-                  </div>
-
-                </div>
-
-                <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-
-                  <div className="flex items-center gap-3">
-
-                    <div className="rounded-lg bg-amber-400/10 p-2 text-amber-400">
-
-                      <Activity size={17} />
-
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-
-                      <p className="text-xs font-medium text-slate-200">
-
-                        Cash conversion
-
-                      </p>
-
-                      <p className="mt-1 text-[11px] text-slate-500">
-
-                        OCF / net income: {financialResult ? formatRatio(analysis.operating_cash_flow_to_net_income) : '0.73×'}
-
-                      </p>
-
-                    </div>
-
-                    <span className="text-[10px] text-amber-400">Review</span>
-
-                  </div>
-
-                </div>
-
-                <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-
-                  <div className="flex items-center gap-3">
-
-                    <div className="rounded-lg bg-lime-400/10 p-2 text-lime-300">
-
-                      <BriefcaseBusiness size={17} />
-
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-
-                      <p className="text-xs font-medium text-slate-200">
-
-                        Leverage
-
-                      </p>
-
-                      <p className="mt-1 text-[11px] text-slate-500">
-
-                        Debt-to-equity: {financialResult ? formatRatio(analysis.debt_to_equity) : '0.17×'}
-
-                      </p>
-
-                    </div>
-
-                    <span className="text-[10px] text-lime-300">Review</span>
-
-                  </div>
-
-                </div>
-
-              </div>
-
-              <p className="mt-4 text-[10px] leading-5 text-slate-600">
-
-                Preview only. Risk classifications require report-specific
-
-                evidence and context; ratios alone do not establish a risk rating.
-
-              </p>
-
+              ) : <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-xs text-slate-500">Verified total assets and equity are required to render this chart.</div>}
             </article>
-
+            <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
+              <h3 className="text-sm font-semibold text-white">Performance trend</h3><p className="mt-1 text-xs text-slate-500">Income statement comparison · reported values, not a time series</p>
+              <div className="mt-4 h-[230px]">{statementLineData.length >= 2 ? <ResponsiveContainer width="100%" height="100%"><LineChart data={statementLineData} margin={{top:12,right:12,left:4,bottom:4}}><CartesianGrid stroke="#273449" strokeDasharray="3 5" vertical={false}/><XAxis dataKey="name" tick={{fill:'#94a3b8',fontSize:10}} tickLine={false} axisLine={false}/><YAxis tick={{fill:'#94a3b8',fontSize:10}} tickLine={false} axisLine={false}/><Tooltip formatter={(value)=>formatAmount(Number(value),currency,units)} contentStyle={{background:'#111c2e',border:'1px solid #334155',borderRadius:12}}/><Line type="monotone" dataKey="value" name="Reported amount" stroke="#a78bfa" strokeWidth={3} dot={{r:5,fill:'#38bdf8',stroke:'#0e1422',strokeWidth:2}} activeDot={{r:7,fill:'#a3e635'}}/></LineChart></ResponsiveContainer> : <div className="flex h-full flex-col items-center justify-center rounded-xl border border-dashed border-white/10 px-6 text-center"><Activity size={24} className="text-sky-300"/><p className="mt-3 text-sm text-slate-300">Not enough verified income-statement values</p><p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">At least two verified amounts are required to draw this comparison. No sample values are shown.</p></div>}</div>
+            </article>
           </section>
 
           <section className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">

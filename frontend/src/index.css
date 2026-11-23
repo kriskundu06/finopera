@@ -55,7 +55,7 @@ body {
   aside,
   header,
   button,
-  .print\\:hidden {
+  [class~="print:hidden"] {
     display: none !important;
   }
 
