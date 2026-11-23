@@ -396,7 +396,7 @@ function App() {
   function downloadOriginalPdf() {
     if (!documentInfo?.document_id) return
     const link = document.createElement('a')
-    link.href = `${API_BASE_URL}/documents/${encodeURIComponent(documentInfo.document_id)}/download`
+    link.href = `${API_BASE_URL}/documents/${encodeURIComponent(documentInfo.document_id)}/download?filename=${encodeURIComponent(documentInfo.filename || 'original-report.pdf')}`
     link.download = documentInfo.filename || 'original-report.pdf'
     document.body.appendChild(link)
     link.click()
@@ -432,7 +432,7 @@ function App() {
       document.body.appendChild(link)
       link.click()
       link.remove()
-      URL.revokeObjectURL(url)
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Could not download the analysis PDF.')
     }
