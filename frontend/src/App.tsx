@@ -131,6 +131,14 @@ const metrics = [
 
 ]
 
+type EvidenceReference = {
+  filename?: string
+  page?: number
+  quote?: string
+  type?: string
+  formula?: string
+}
+
 type FinancialAnalysisResponse = {
 
   message?: string
@@ -149,7 +157,7 @@ type FinancialAnalysisResponse = {
 
   }
 
-  evidence?: Record<string, any>
+  evidence?: Record<string, EvidenceReference | null | undefined>
 
   sources?: Array<{ source?: string; page?: number }>
 
@@ -391,7 +399,7 @@ function App() {
 
     const userMessage: ChatMessage = {
 
-      id: `${Date.now()}-user`,
+      id: `user-${chatMessages.length}`,
 
       role: 'user',
 
@@ -445,7 +453,7 @@ function App() {
 
         {
 
-          id: `${Date.now()}-assistant`,
+          id: `assistant-${chatMessages.length}`,
 
           role: 'assistant',
 
