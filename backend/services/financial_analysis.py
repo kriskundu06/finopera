@@ -68,11 +68,6 @@ def calculate_financial_metrics(
         if value is not None:
             metrics[metric_name] = round(value, 2)
 
-    if metrics["free_cash_flow"] is not None:
-        metrics["free_cash_flow"] = round(
-            metrics["free_cash_flow"], 2
-        )
-
     return {
         "currency": financials.get("currency", "unspecified"),
         "units": financials.get("units", "unspecified"),
