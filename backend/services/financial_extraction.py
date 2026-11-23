@@ -244,7 +244,7 @@ def _build_context(
 
             if statement == "balance_sheet"
 
-            else 1800
+            else 4000
 
         )
 
