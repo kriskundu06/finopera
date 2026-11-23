@@ -729,7 +729,7 @@ def _extract_statement(
 
         visual_source_available = (
             matched_source is not None
-            bool(matched_source.get("image_attached"))
+            and bool(matched_source.get("image_attached"))
             and bool(matched_source.get("image_path"))
             and Path(matched_source["image_path"]).is_file()
         )
