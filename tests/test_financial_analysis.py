@@ -175,3 +175,70 @@ def test_document_statement_retrieval_is_scoped_and_prefers_labelled_chunks(monk
         chunk["document_id"] == document_id
         for passages in grouped.values() for chunk in passages
     )
+
+
+def test_gemini_uses_fallback_model_after_primary_503(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    import backend.services.financial_extraction as extraction
+
+    calls = []
+    class FakeModels:
+        def generate_content(self, *, model, contents, config):
+            calls.append(model)
+            if model == "primary-model":
+                error = RuntimeError("temporarily unavailable")
+                error.code = 503
+                raise error
+            return SimpleNamespace(text=json.dumps({
+                "revenue": None,
+                "operating_income": None,
+                "net_income": None,
+                "evidence": {
+                    "revenue": {"source_id": None, "quote": None},
+                    "operating_income": {"source_id": None, "quote": None},
+                    "net_income": {"source_id": None, "quote": None},
+                },
+            }))
+
+    monkeypatch.setattr(extraction, "client", SimpleNamespace(models=FakeModels()))
+    monkeypatch.setattr(extraction, "GEMINI_MODEL", "primary-model")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "fallback-model")
+    monkeypatch.setattr(extraction.time, "sleep", lambda _: None)
+
+    result = extraction._call_gemini(
+        "income_statement",
+        "[S1 | File: sample.pdf | Page: 1] Revenue 100",
+    )
+
+    assert calls == ["primary-model"] * 3 + ["fallback-model"]
+    assert result["revenue"] is None
+
+
+def test_gemini_does_not_fallback_on_non_transient_error(monkeypatch):
+    from types import SimpleNamespace
+    import backend.services.financial_extraction as extraction
+
+    calls = []
+    class FakeModels:
+        def generate_content(self, *, model, contents, config):
+            calls.append(model)
+            error = RuntimeError("unauthorized")
+            error.code = 401
+            raise error
+
+    monkeypatch.setattr(extraction, "client", SimpleNamespace(models=FakeModels()))
+    monkeypatch.setattr(extraction, "GEMINI_MODEL", "primary-model")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "fallback-model")
+
+    try:
+        extraction._call_gemini(
+            "income_statement",
+            "[S1 | File: sample.pdf | Page: 1] Revenue 100",
+        )
+    except RuntimeError as exc:
+        assert "primary-model" in str(exc)
+    else:
+        raise AssertionError("Expected non-transient Gemini failure")
+
+    assert calls == ["primary-model"]
