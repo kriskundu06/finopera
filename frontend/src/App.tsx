@@ -216,11 +216,11 @@ type ChatMessage = {
 
 const SUGGESTED_QUESTIONS = [
 
-  'What are the company’s main financial risks?',
+  'Prepare an executive summary of the company and its business model.',
 
-  'What is the company’s total debt, and which page supports it?',
+  'Identify material financial, operational, legal, and regulatory risks.',
 
-  'Summarize revenue and profitability for this reporting period.',
+  'Assess earnings quality, liquidity, leverage, and debt obligations.',
 
 ]
 
@@ -302,6 +302,10 @@ function App() {
   const [isAsking, setIsAsking] = useState(false)
 
   const [chatError, setChatError] = useState('')
+
+  const [dueDiligenceBusy, setDueDiligenceBusy] = useState(false)
+  const [dueDiligenceError, setDueDiligenceError] = useState('')
+  const [dueDiligenceMessage, setDueDiligenceMessage] = useState('')
 
   const chatEndRef = useRef<HTMLDivElement>(null)
 
@@ -1010,6 +1014,13 @@ function App() {
                 <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Ask your financial report</h2>
 
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Ask questions about the indexed documents. Answers include retrieved source passages so you can verify the details in context.</p>
+
+                <div className="mt-5 flex flex-wrap items-center gap-3">
+                  <button type="button" disabled={!documentInfo?.document_id||dueDiligenceBusy} onClick={async()=>{if(!documentInfo?.document_id)return;setDueDiligenceBusy(true);setDueDiligenceError('');setDueDiligenceMessage('Reviewing report evidence and preparing the comprehensive assessment…');try{const response=await fetch(`${API_BASE_URL}/due-diligence/report`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({document_id:documentInfo.document_id,filename:documentInfo.filename,reporting_period:financialResult?.reporting_period,financials,analysis:financialResult?.analysis})});if(!response.ok){const payload=await response.json().catch(()=>({}));throw new Error(payload.detail||'Could not generate the due-diligence report.');}const blob=await response.blob();const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='finopera-due-diligence-report.pdf';document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);setDueDiligenceMessage('Comprehensive due-diligence report generated and downloaded. Verify cited claims against the original PDF.');}catch(error){setDueDiligenceError(error instanceof Error?error.message:'Report generation failed.');setDueDiligenceMessage('');}finally{setDueDiligenceBusy(false);}}} className="inline-flex items-center gap-2 rounded-xl bg-lime-500 px-4 py-3 text-sm font-medium text-white transition hover:bg-lime-400 disabled:cursor-not-allowed disabled:opacity-40"><FileText size={16}/>{dueDiligenceBusy?'Generating report…':'Generate comprehensive due diligence report'}</button>
+                  {!documentInfo?.document_id&&<span className="text-xs text-slate-500">Upload and analyze a report first.</span>}
+                </div>
+                {dueDiligenceMessage&&<p className="mt-3 text-xs text-emerald-300">{dueDiligenceMessage}</p>}
+                {dueDiligenceError&&<p role="alert" className="mt-3 text-xs text-rose-300">{dueDiligenceError}</p>}
 
               </div>
 
