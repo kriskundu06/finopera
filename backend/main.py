@@ -404,7 +404,7 @@ def download_financial_analysis_report(payload: dict = Body(...)):
         ref = evidence.get(field) if isinstance(evidence.get(field), dict) else {}
         source = "Calculated" if str(ref.get("type", "")).startswith("calculated") else (
             f"{ref.get('filename') or payload.get('filename') or 'Source'} · p. {ref.get('page')}"
-            if ref.get("page") else "Not verified"
+            if ref.get("page") else "Not available in extracted evidence"
         )
         rows.append([field.replace("_", " ").title(), "—" if value is None else str(value), source])
     table = Table(rows, colWidths=[155, 115, 205], repeatRows=1)
@@ -418,7 +418,7 @@ def download_financial_analysis_report(payload: dict = Body(...)):
         ("PADDING", (0, 0), (-1, -1), 6),
     ]))
     story.extend([table, Spacer(1, 16), Paragraph("Calculated ratios", styles["Heading2"])])
-    ratio_rows = [["Metric", "Value"]] + [[key.replace("_", " ").title(), str(value)] for key, value in analysis.items()]
+    ratio_rows = [["Metric", "Value"]] + [[key.replace("_", " ").title(), "—" if value is None else str(value)] for key, value in analysis.items()]
     if len(ratio_rows) > 1:
         ratios = Table(ratio_rows, colWidths=[235, 235], repeatRows=1)
         ratios.setStyle(TableStyle([
