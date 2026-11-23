@@ -423,42 +423,69 @@ DOCUMENT EXCERPTS:
 
     response = None
     max_attempts = 3
+    fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.8-flash").strip()
+    models_to_try = [GEMINI_MODEL]
+    if fallback_model and fallback_model != GEMINI_MODEL:
+        models_to_try.append(fallback_model)
 
-    for attempt in range(1, max_attempts + 1):
-        try:
-            response = client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-                config={
-                    "temperature": 0,
-                    "response_mime_type": "application/json",
-                    "max_output_tokens": 2600,
-                },
-            )
+    last_error: Exception | None = None
+    for model_index, model_name in enumerate(models_to_try):
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config={
+                        "temperature": 0,
+                        "response_mime_type": "application/json",
+                        "max_output_tokens": 2600,
+                    },
+                )
+                if model_name != GEMINI_MODEL:
+                    logger.warning(
+                        "Financial extraction for %s succeeded using fallback model %s",
+                        statement, model_name,
+                    )
+                break
+            except Exception as exc:
+                last_error = exc
+                status_code = getattr(exc, "code", None) or getattr(
+                    exc, "status_code", None
+                )
+                transient = status_code in {429, 500, 502, 503, 504}
+                if not transient:
+                    raise RuntimeError(
+                        f"Gemini request failed for {statement} using "
+                        f"{model_name}: {type(exc).__name__}: {exc}"
+                    ) from exc
+
+                if attempt < max_attempts:
+                    delay_seconds = 2 ** (attempt - 1)
+                    logger.warning(
+                        "Transient Gemini failure for %s using %s "
+                        "(attempt %s/%s, status=%s); retrying in %s seconds",
+                        statement, model_name, attempt, max_attempts,
+                        status_code, delay_seconds,
+                    )
+                    time.sleep(delay_seconds)
+                elif model_index < len(models_to_try) - 1:
+                    logger.warning(
+                        "Gemini model %s remains unavailable for %s after %s "
+                        "attempts; switching to fallback model %s",
+                        model_name, statement, max_attempts,
+                        models_to_try[model_index + 1],
+                    )
+
+            if response is not None:
+                break
+        if response is not None:
             break
-        except Exception as exc:
-            # Retry only transient provider/service failures. Invalid requests,
-            # authentication failures and malformed prompts should fail fast.
-            status_code = getattr(exc, "code", None) or getattr(
-                exc, "status_code", None
-            )
-            transient = status_code in {429, 500, 502, 503, 504}
-            if not transient or attempt == max_attempts:
-                raise RuntimeError(
-                    f"Gemini request failed for {statement}: "
-                    f"{type(exc).__name__}: {exc}"
-                ) from exc
-
-            delay_seconds = 2 ** (attempt - 1)
-            logger.warning(
-                "Transient Gemini failure for %s (attempt %s/%s, status=%s); "
-                "retrying in %s seconds",
-                statement, attempt, max_attempts, status_code, delay_seconds,
-            )
-            time.sleep(delay_seconds)
 
     if response is None:
-        raise RuntimeError(f"Gemini returned no response for {statement}.")
+        raise RuntimeError(
+            f"Gemini extraction failed for {statement} on models "
+            f"{', '.join(models_to_try)} after retries: {last_error}"
+        ) from last_error
 
 
 
