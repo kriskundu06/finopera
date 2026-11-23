@@ -22,6 +22,7 @@ def answer_question(
     question: str,
     top_k: int = 5,
     document_id: str | None = None,
+    conversation_history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Answer a document-scoped question, using semantic cache when safe."""
 
@@ -40,7 +41,15 @@ def answer_question(
 
     document_id = document_id.strip()
 
-    # Cache failures must never make the normal RAG workflow unavailable.
+    history = []
+    for turn in (conversation_history or [])[-8:]:
+        if not isinstance(turn, dict) or turn.get("role") not in {"user", "assistant"}:
+            continue
+        content = str(turn.get("content", "")).strip()[:1200]
+        if content:
+            history.append({"role": turn["role"], "content": content})
+
+    # Contextual follow-ups bypass semantic cache because their meaning depends on history.
     try:
         cached = lookup_answer(
             question=question,
@@ -49,6 +58,9 @@ def answer_question(
         )
     except Exception:
         logger.exception("Semantic cache lookup failed; falling back to normal RAG.")
+        cached = None
+
+    if history:
         cached = None
 
     if cached is not None:
@@ -62,8 +74,11 @@ def answer_question(
     logger.info("Semantic cache MISS for document %s", document_id)
 
     # Retrieve passages exclusively from the selected PDF.
+    retrieval_query = " ".join(
+        [turn["content"] for turn in history[-4:] if turn["role"] == "user"] + [question]
+    )[-1800:]
     chunks = search_chunks(
-        query=question,
+        query=retrieval_query,
         top_k=top_k,
         document_id=document_id,
     )
@@ -100,6 +115,10 @@ def answer_question(
             "text": text,
         })
 
+    history_text = "\n".join(
+        f'{turn["role"].upper()}: {turn["content"]}' for turn in history
+    ) or "No previous conversation."
+
     prompt = f"""
 You are an AI due-diligence assistant analyzing company documents.
 
@@ -111,6 +130,12 @@ Rules:
 - If the evidence does not contain the answer, say so explicitly.
 - Distinguish facts stated in the document from your interpretation.
 - Be concise, structured, and professional.
+- Use conversation history only to resolve references and context; retrieved document passages remain the only source of factual claims.
+- For follow-up questions, retrieve and cite the relevant supporting passages again.
+- Never treat prior assistant text as independent evidence.
+
+CONVERSATION HISTORY (context only):
+{history_text}
 
 DOCUMENT PASSAGES:
 {"".join(part + chr(10) + chr(10) for part in context_parts)}
@@ -145,9 +170,10 @@ USER QUESTION:
         "model": GEMINI_MODEL,
     }
 
-    # Cache only successful answers grounded in retrieved document evidence.
-    # A cache storage failure must not discard the valid Gemini response.
+    # Contextual follow-ups are not cached; their meaning depends on conversation history.
     try:
+        if history:
+            raise RuntimeError("Skip semantic cache for contextual follow-up")
         cache_id = store_answer(
             question=question,
             document_id=document_id,
@@ -162,7 +188,8 @@ USER QUESTION:
         }
         logger.info("Stored semantic cache entry %s", cache_id)
     except Exception:
-        logger.exception("Could not store semantic cache entry.")
+        if not history:
+            logger.exception("Could not store semantic cache entry.")
         result["cache"] = {
             "hit": False,
             "stored": False,
