@@ -475,6 +475,8 @@ function App() {
 
   const analysis = financialResult?.analysis?.metrics ?? {}
 
+  const currentPageLabel = navigation.find((item) => item.page === activePage)?.label ?? activePage
+
   const statementLineData = [
     { name: 'Revenue', value: financials.revenue },
     { name: 'Gross profit', value: financials.gross_profit },
@@ -715,13 +717,13 @@ function App() {
 
                 Workspace <span>/</span>
 
-                <span className="text-slate-300">{activePage}</span>
+                <span className="text-slate-300">{currentPageLabel}</span>
 
               </div>
 
               <h1 className="mt-1 truncate text-base font-semibold text-white">
 
-                {activePage}
+                {currentPageLabel}
 
               </h1>
 
@@ -827,7 +829,7 @@ function App() {
 
                   </div>
 
-                  <p className="mt-3 text-sm leading-6 text-slate-400">Risk assessment presents a preliminary screen of available liquidity, leverage, and cash-generation measures. Indicators are heuristic signals to help direct review—not a validated credit rating or a prediction of default.</p>
+                  <p className="mt-3 text-sm leading-6 text-slate-400">Review extracted statements, source evidence, and calculated ratios before using any figures in a decision.</p>
 
                 </article>
 
