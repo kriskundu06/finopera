@@ -239,6 +239,10 @@ function formatAmount(value: unknown, currency = 'USD', units = 'millions') {
 
   } else if (normalizedUnits.includes('billion')) suffix = 'B'
 
+  else if (normalizedUnits.includes('crore')) suffix = ' Cr'
+
+  else if (normalizedUnits.includes('lakh')) suffix = ' L'
+
   else if (normalizedUnits.includes('thousand')) suffix = 'K'
 
   return `${symbol}${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`
