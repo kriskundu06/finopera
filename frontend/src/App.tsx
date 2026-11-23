@@ -38,6 +38,7 @@ import {
   Menu,
 
   Send,
+  Settings,
 
   Bot,
 
@@ -829,7 +830,7 @@ function App() {
 
       </aside>
 
-      <div className="min-h-screen lg:pl-[252px]">
+      <div className={`min-h-screen ${sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[252px]'}`}>
 
         <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-white/[0.07] bg-[#090d18]/90 px-5 backdrop-blur-xl sm:px-8">
 
