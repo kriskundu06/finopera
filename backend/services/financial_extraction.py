@@ -1024,7 +1024,7 @@ def _build_extraction_status(
         )
 
     return {
-        **extraction_summary,
+        "verified_fields": verified_fields,
         "missing_fields": missing_fields,
         "extraction_status": "completed" if complete else "partial",
         "message": message,
