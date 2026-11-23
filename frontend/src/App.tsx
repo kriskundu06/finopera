@@ -773,7 +773,7 @@ function App() {
 
                   </div>
 
-                  <p className="mt-3 text-sm leading-6 text-slate-400">From Overview, choose <strong className="font-medium text-slate-200">Analyze a report</strong> and upload a PDF financial report. FinOpera accepts PDFs up to 20 MB. Use a report with selectable text for the best results; scanned PDFs may not extract reliably.</p>
+                  <p className="mt-3 text-sm leading-6 text-slate-400">From Documents, choose <strong className="font-medium text-slate-200">Analyze a report</strong> and upload a PDF financial report. FinOpera accepts PDFs up to 20 MB. Use a report with selectable text for the best results; scanned PDFs may not extract reliably.</p>
 
                 </article>
 
@@ -825,7 +825,7 @@ function App() {
 
                     <div className="rounded-xl bg-amber-400/10 p-2.5 text-amber-300"><ShieldAlert size={19} /></div>
 
-                    <h3 className="text-sm font-semibold text-white">5. Review risk indicators</h3>
+                    <h3 className="text-sm font-semibold text-white">5. Review extracted figures</h3>
 
                   </div>
 
@@ -865,7 +865,7 @@ function App() {
 
                   <li>Results depend on the quality and completeness of the uploaded report and the extraction model.</li>
 
-                  <li>Risk thresholds are screening rules, not a validated risk-prediction model.</li>
+                  <li>Calculated ratios are screening metrics and should be interpreted in business and industry context.</li>
 
                   <li>Do not treat missing values as zero or assume a single reporting period shows a trend.</li>
 
