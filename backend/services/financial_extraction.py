@@ -153,7 +153,7 @@ def _select_statement_pages(
         ]
         visual_fallback.sort(
             key=lambda item: (
-                len(re.findall(r"\\d", item.get("text", ""))),
+                len(re.findall(r"\d", item.get("text", ""))),
                 -item["page"],
             ),
             reverse=True,
@@ -163,7 +163,7 @@ def _select_statement_pages(
     if not selected:
         numeric_ranked = sorted(
             page_passages,
-            key=lambda item: len(re.findall(r"\\d", item.get("text", ""))),
+            key=lambda item: len(re.findall(r"\d", item.get("text", ""))),
             reverse=True,
         )
         selected = numeric_ranked[:min(4, len(numeric_ranked))]
