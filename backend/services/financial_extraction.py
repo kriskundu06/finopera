@@ -680,6 +680,7 @@ def _extract_statement(
         quote_is_grounded = (
             isinstance(quote, str)
             and bool(quote.strip())
+            and matched_source is not None
             and _normalize_text(quote) in _normalize_text(matched_source["text"])
             and _quote_contains_value(value, quote)
         )
