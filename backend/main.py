@@ -276,8 +276,7 @@ def download_financial_analysis_report(payload: dict = Body(...)):
     """Generate a portable PDF summary of extracted financials and their evidence."""
     from io import BytesIO
     from xml.sax.saxutils import escape
-    from reportlab.graphics.shapes import Drawing
-    from reportlab.graphics.charts.barcharts import HorizontalBarChart
+    from reportlab.graphics.shapes import Drawing, String, Rect, Line
 
     financials = payload.get("financials") or {}
     evidence = payload.get("evidence") or {}
@@ -295,107 +294,92 @@ def download_financial_analysis_report(payload: dict = Body(...)):
         Paragraph(f"Reporting period: {escape(str(payload.get('reporting_period') or 'Not identified'))}", styles["Normal"]),
         Paragraph(f"Currency: {escape(str(payload.get('currency') or 'Unspecified'))} · Units: {escape(str(payload.get('units') or 'Unspecified'))}", styles["Normal"]),
         Paragraph(f"Extraction status: {escape(str(payload.get('extraction_status') or 'unknown'))}", styles["Normal"]),
-        Spacer(1, 16),
-        Paragraph("Extracted financial figures", styles["Heading2"]),
-    ]
-    # Add evidence-backed visualizations. Missing values are omitted rather
-    # than replaced with zero or illustrative numbers.
-    story.extend([
+        Spacer(1, 14),
         Paragraph("Visual analysis", styles["Heading2"]),
-        Spacer(1, 6),
-    ])
-
-    chart_groups = [
-        ("Income statement and cash flow", [
-            ("Revenue", "revenue"),
-            ("Gross profit", "gross_profit"),
-            ("Operating income", "operating_income"),
-            ("Net income", "net_income"),
-            ("Operating cash flow", "operating_cash_flow"),
-            ("Capital expenditure", "capital_expenditure"),
-        ]),
-        ("Balance sheet", [
-            ("Current assets", "current_assets"),
-            ("Current liabilities", "current_liabilities"),
-            ("Long-term debt", "long_term_debt"),
-            ("Total debt", "total_debt"),
-            ("Total equity", "total_equity"),
-            ("Total assets", "total_assets"),
-        ]),
     ]
 
-    def add_horizontal_chart(title, items, suffix=""):
+    def add_bar_chart(title, items, percent=False):
         available = [
-            (label, financials.get(key))
+            (label, float(financials[key]))
             for label, key in items
             if isinstance(financials.get(key), (int, float))
             and not isinstance(financials.get(key), bool)
         ]
         if len(available) < 2:
             return
-        labels = [item[0] for item in available]
-        values = [float(item[1]) for item in available]
-        drawing = Drawing(500, max(125, 28 * len(available) + 35))
-        chart = HorizontalBarChart()
-        chart.x = 145
-        chart.y = 22
-        chart.width = 335
-        chart.height = max(90, 25 * len(available))
-        chart.data = [values]
-        chart.categoryAxis.categoryNames = labels
-        chart.categoryAxis.labels.fontName = "Helvetica"
-        chart.categoryAxis.labels.fontSize = 7
-        chart.categoryAxis.labels.dx = -4
-        chart.categoryAxis.labels.dy = 0
-        chart.valueAxis.labels.fontSize = 7
-        chart.valueAxis.valueMin = min(0, min(values) * 1.1)
-        chart.valueAxis.valueMax = max(1, max(values) * 1.1)
-        chart.valueAxis.valueStep = max(1, (chart.valueAxis.valueMax - chart.valueAxis.valueMin) / 4)
-        chart.bars[0].fillColor = colors.HexColor("#38A3A5")
-        chart.bars[0].strokeColor = colors.HexColor("#243047")
-        chart.barHeight = 11
-        chart.groupSpacing = 7
-        drawing.add(chart)
-        story.append(Paragraph(escape(title), styles["Heading3"]))
+        width = 500
+        row_height = 24
+        height = 42 + row_height * len(available)
+        drawing = Drawing(width, height)
+        drawing.add(String(0, height - 12, title, fontName="Helvetica-Bold", fontSize=9, fillColor=colors.HexColor("#243047")))
+        label_width = 132
+        plot_left = label_width
+        plot_width = width - label_width - 12
+        values = [value for _, value in available]
+        low = min(0.0, min(values))
+        high = max(0.0, max(values))
+        span = high - low
+        if span == 0:
+            span = 1.0
+        scale = plot_width / span
+        zero_x = plot_left + (0 - low) * scale
+        drawing.add(Line(zero_x, 10, zero_x, height - 24, strokeColor=colors.HexColor("#94A3B8"), strokeWidth=0.7))
+        for index, (label, value) in enumerate(available):
+            y = height - 34 - index * row_height
+            drawing.add(String(0, y + 3, label[:23], fontName="Helvetica", fontSize=7, fillColor=colors.HexColor("#334155")))
+            value_x = plot_left + (value - low) * scale
+            bar_x = min(zero_x, value_x)
+            bar_width = max(1, abs(value_x - zero_x))
+            drawing.add(Rect(bar_x, y, bar_width, 11, fillColor=colors.HexColor("#38A3A5"), strokeColor=None))
+            shown = f"{value:,.2f}%" if percent else f"{value:,.2f}"
+            text_x = min(width - 62, value_x + 4) if value >= 0 else max(plot_left, value_x - 54)
+            drawing.add(String(text_x, y + 2, shown, fontName="Helvetica", fontSize=6.5, fillColor=colors.HexColor("#243047")))
         story.append(drawing)
         story.append(Spacer(1, 8))
 
-    for chart_title, chart_items in chart_groups:
-        add_horizontal_chart(chart_title, chart_items)
-
-    ratio_items = [
-        (key.replace("_", " ").title(), value)
+    add_bar_chart("Core income statement figures", [
+        ("Revenue", "revenue"),
+        ("Operating income", "operating_income"),
+        ("Net income", "net_income"),
+    ])
+    add_bar_chart("Core balance sheet figures", [
+        ("Current assets", "current_assets"),
+        ("Current liabilities", "current_liabilities"),
+        ("Total debt", "total_debt"),
+        ("Total equity", "total_equity"),
+        ("Total assets", "total_assets"),
+    ])
+    ratio_values = [
+        (key.replace("_", " ").title(), float(value))
         for key, value in analysis.items()
         if isinstance(value, (int, float)) and not isinstance(value, bool)
     ]
-    if len(ratio_items) >= 2:
-        drawing = Drawing(500, max(125, 28 * len(ratio_items) + 35))
-        chart = HorizontalBarChart()
-        chart.x, chart.y, chart.width = 145, 22, 335
-        chart.height = max(90, 25 * len(ratio_items))
-        chart.data = [[float(value) for _, value in ratio_items]]
-        chart.categoryAxis.categoryNames = [label for label, _ in ratio_items]
-        chart.categoryAxis.labels.fontName = "Helvetica"
-        chart.categoryAxis.labels.fontSize = 7
-        chart.valueAxis.labels.fontSize = 7
-        ratio_values = [float(value) for _, value in ratio_items]
-        chart.valueAxis.valueMin = min(0, min(ratio_values) * 1.1)
-        chart.valueAxis.valueMax = max(1, max(ratio_values) * 1.1)
-        chart.valueAxis.valueStep = max(1, (chart.valueAxis.valueMax - chart.valueAxis.valueMin) / 4)
-        chart.bars[0].fillColor = colors.HexColor("#6477C8")
-        chart.bars[0].strokeColor = colors.HexColor("#243047")
-        chart.barHeight = 11
-        chart.groupSpacing = 7
-        drawing.add(chart)
-        story.append(Paragraph("Calculated ratios", styles["Heading3"]))
+    if len(ratio_values) >= 2:
+        width, row_height = 500, 24
+        height = 42 + row_height * len(ratio_values)
+        drawing = Drawing(width, height)
+        drawing.add(String(0, height - 12, "Calculated ratios", fontName="Helvetica-Bold", fontSize=9, fillColor=colors.HexColor("#243047")))
+        label_width, plot_width = 190, 298
+        values = [value for _, value in ratio_values]
+        low, high = min(0.0, min(values)), max(0.0, max(values))
+        span = max(1.0, high - low)
+        scale = plot_width / span
+        zero_x = label_width + (0 - low) * scale
+        drawing.add(Line(zero_x, 10, zero_x, height - 24, strokeColor=colors.HexColor("#94A3B8"), strokeWidth=0.7))
+        for index, (label, value) in enumerate(ratio_values):
+            y = height - 34 - index * row_height
+            drawing.add(String(0, y + 3, label[:30], fontName="Helvetica", fontSize=7, fillColor=colors.HexColor("#334155")))
+            value_x = label_width + (value - low) * scale
+            drawing.add(Rect(min(zero_x, value_x), y, max(1, abs(value_x - zero_x)), 11, fillColor=colors.HexColor("#6477C8"), strokeColor=None))
+            drawing.add(String(min(width - 48, value_x + 4) if value >= 0 else max(label_width, value_x - 42), y + 2, f"{value:,.2f}", fontName="Helvetica", fontSize=6.5, fillColor=colors.HexColor("#243047")))
         story.append(drawing)
         story.append(Spacer(1, 10))
 
     story.append(Paragraph(
-        "Charts include only numeric values returned by extraction; missing fields are excluded, not treated as zero.",
+        "Charts include only extracted numeric values; unavailable fields are omitted, not treated as zero.",
         styles["Italic"],
     ))
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 10))
 
     rows = [["Statement field", "Value", "Evidence"]]
     for field, value in financials.items():
