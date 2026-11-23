@@ -962,7 +962,8 @@ def _apply_balance_sheet_fallback(
 
     current_portion_result = _find_current_debt_portion(passages, document_id)
     if current_portion_result is None:
-        if evidence.get("total_debt", {}).get("type") != (
+        total_debt_evidence = evidence.get("total_debt") or {}
+        if total_debt_evidence.get("type") != (
             "calculated_from_reported_components"
         ):
             financials["total_debt"] = None
@@ -1028,10 +1029,7 @@ def extract_financials(
         if not passages:
 
             for field in fields:
-
                 financials[field] = None
-            field_status[field] = "missing_evidence"
-
                 evidence[field] = None
                 field_status[field] = "no_relevant_passages"
 
@@ -1152,6 +1150,7 @@ def extract_financials(
         if financials.get(field) is not None and evidence.get(field) is None:
             print(f"Final evidence audit cleared unsupported field: {field}")
             financials[field] = None
+            field_status[field] = "missing_evidence"
 
     currency = financials.get("currency") or "unspecified"
 
