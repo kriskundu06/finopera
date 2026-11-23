@@ -43,6 +43,7 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     document_id: str = Field(min_length=1, max_length=64)
     top_k: int = Field(default=5, ge=1, le=10)
+    conversation_history: list[dict[str, str]] = Field(default_factory=list, max_length=8)
 
 
 class FinancialAnalysisRequest(BaseModel):
@@ -554,6 +555,7 @@ def ask_question_endpoint(request: AskRequest):
             question=request.question,
             document_id=document_id,
             top_k=request.top_k,
+            conversation_history=request.conversation_history,
         )
     except ValueError as exc:
         raise HTTPException(
