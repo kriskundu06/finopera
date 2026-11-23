@@ -204,11 +204,9 @@ def _retrieve_statement_passages(
                 count = text.count(term)
                 if count:
                     score += min(count, 3) * (3.0 if " " in term else 1.0)
-            # A preserved image is a real visual source even when OCR
-            # returns no useful text. Give it a modest candidate boost without
-            # injecting fake statement keywords into the searchable text.
-            if passage.get("image_path") and Path(passage["image_path"]).is_file():
-                score += 8.0
+            # Image availability is handled as a fallback after relevance
+            # scoring; it must not make an unrelated page outrank a statement
+            # page merely because an image was preserved.
 
             # Tables with many numeric cells are often the actual statement.
             numeric_tokens = re.findall(r"(?<![A-Za-z])\(?\d[\d,]*(?:\.\d+)?\)?", text)
@@ -237,23 +235,11 @@ def _retrieve_statement_passages(
                     if page_number in scores:
                         scores[page_number] += 5.0
 
-        ranked = sorted(
+        selected = _select_statement_pages(
             page_passages,
-            key=lambda item: (scores.get(item["page"], 0), -item["page"]),
-            reverse=True,
+            scores,
+            statement,
         )
-        limit = 12 if statement == "balance_sheet" else 8
-        selected = [item for item in ranked if scores.get(item["page"], 0) > 0][:limit]
-
-        # If ranking signals are sparse (e.g. OCR text is fragmented), retain
-        # a small set of pages with the most numeric content instead of none.
-        if not selected:
-            numeric_ranked = sorted(
-                page_passages,
-                key=lambda item: len(re.findall(r"\d", item["text"])),
-                reverse=True,
-            )
-            selected = numeric_ranked[:min(4, len(numeric_ranked))]
 
         grouped[statement] = selected
         print(
