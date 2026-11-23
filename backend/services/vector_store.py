@@ -194,3 +194,47 @@ def search_chunks(
         )
 
     return matches
+
+
+def get_document_chunks(document_id: str) -> list[dict[str, Any]]:
+    """Return every indexed chunk for one document, in page/chunk order.
+
+    Financial statements are dense tables. Semantic top-k retrieval can miss
+    rows or separate a row from its column headings, so extraction needs a
+    document-wide candidate set before ranking complete pages.
+    """
+    if not document_id:
+        return []
+
+    collection = get_collection()
+    if collection.count() == 0:
+        return []
+
+    results = collection.get(
+        where={"document_id": document_id},
+        include=["documents", "metadatas"],
+    )
+
+    documents = results.get("documents") or []
+    metadatas = results.get("metadatas") or []
+    ids = results.get("ids") or []
+    chunks = []
+
+    for index, text in enumerate(documents):
+        metadata = metadatas[index] or {}
+        chunks.append({
+            "chunk_id": ids[index] if index < len(ids) else None,
+            "text": text or "",
+            "source": metadata.get("source", "unknown"),
+            "document_id": metadata.get("document_id"),
+            "page": metadata.get("page"),
+            "chunk_number": metadata.get("chunk_number", 0),
+        })
+
+    return sorted(
+        chunks,
+        key=lambda item: (
+            item.get("page") or 0,
+            item.get("chunk_number") or 0,
+        ),
+    )
