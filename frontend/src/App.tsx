@@ -893,6 +893,22 @@ function App() {
               {(uploadError||uploadMessage)&&<div role={uploadError?'alert':'status'} className={`rounded-xl border p-4 text-xs leading-5 ${uploadError?'border-rose-400/20 bg-rose-400/[.05] text-rose-300':'border-lime-400/20 bg-lime-400/[.05] text-lime-100'}`}>{uploadError||uploadMessage}</div>}
               {documentInfo&&<article className="rounded-2xl border border-white/[.08] bg-[#0e1422] p-5"><div className="flex items-center gap-2 text-sm font-semibold text-white"><FileText size={17} className="text-lime-300"/> Current report</div><p className="mt-3 break-all text-sm text-slate-300">{documentInfo.filename}</p><p className="mt-1 text-xs text-slate-500">{documentInfo.total_pages} pages · {documentInfo.indexed_count} indexed chunks</p><button onClick={()=>setActivePage('Financial analysis')} className="mt-4 text-xs font-medium text-lime-300 hover:text-lime-200">Open extracted statements →</button></article>}
             </section>
+
+          ) : activePage === 'Financial analysis' ? (
+            <section className="space-y-6">
+              <div><p className="mb-2 text-[11px] font-semibold uppercase tracking-[.16em] text-lime-300">Extracted data</p><h2 className="text-2xl font-semibold text-white sm:text-3xl">Financial statements</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Extracted values are shown with their source page or calculation evidence. Missing values remain blank rather than being treated as zero.</p></div>
+              {!financialResult ? <div className="rounded-2xl border border-dashed border-white/10 bg-[#0e1422] p-10 text-center text-sm text-slate-500">Upload and analyze a report to view its financial statements.</div> : <>
+                <div className="grid gap-4 sm:grid-cols-3"><article className="rounded-xl border border-white/[.07] bg-[#0e1422] p-4"><p className="text-xs text-slate-500">Reporting period</p><p className="mt-2 text-sm font-medium text-white">{financialResult.reporting_period || 'Not identified'}</p></article><article className="rounded-xl border border-white/[.07] bg-[#0e1422] p-4"><p className="text-xs text-slate-500">Currency</p><p className="mt-2 text-sm font-medium text-white">{currency}</p></article><article className="rounded-xl border border-white/[.07] bg-[#0e1422] p-4"><p className="text-xs text-slate-500">Units</p><p className="mt-2 text-sm font-medium text-white">{units}</p></article></div>
+                <div className="grid gap-5 xl:grid-cols-3">
+                  {[
+                    {title:'Income statement',fields:[['Revenue','revenue'],['Cost of revenue','cost_of_revenue'],['Gross profit','gross_profit'],['Operating income','operating_income'],['Net income','net_income']]},
+                    {title:'Balance sheet',fields:[['Current assets','current_assets'],['Current liabilities','current_liabilities'],['Long-term debt','long_term_debt'],['Total debt','total_debt'],['Total equity','total_equity'],['Total assets','total_assets']]},
+                    {title:'Cash flow statement',fields:[['Operating cash flow','operating_cash_flow'],['Capital expenditure','capital_expenditure']]}
+                  ].map(group=><article key={group.title} className="rounded-2xl border border-white/[.07] bg-[#0e1422] p-5"><h3 className="font-semibold text-white">{group.title}</h3><div className="mt-3 divide-y divide-white/[.06]">{group.fields.map(([label,key])=>{const ref=getEvidenceReference(key);return <div key={key} className="py-3"><div className="flex items-start justify-between gap-3"><span className="text-xs text-slate-400">{label}</span><strong className="text-right text-sm text-white">{formatAmount(financials[key],currency,units)}</strong></div>{ref&&<details className="mt-2"><summary className="cursor-pointer text-[10px] text-lime-300">{ref.filename || 'Source'} · Page {ref.page ?? '—'}</summary>{ref.quote&&<p className="mt-2 whitespace-pre-wrap rounded-lg bg-white/[.03] p-2 text-[11px] leading-5 text-slate-400">{ref.quote}</p>}</details>}</div>})}</div></article>)}
+                </div>
+                <p className="text-[11px] text-slate-600">Extraction is model-assisted. Verify material figures against the original PDF before relying on them.</p>
+              </>}
+            </section>
           ) : activePage === 'Ask AI' ? (
 
             <section className="mx-auto flex w-full max-w-5xl flex-col gap-5">
