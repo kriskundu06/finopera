@@ -1,10 +1,13 @@
 import json
+import logging
 import os
 import re
 from typing import Any
 from dotenv import load_dotenv
 from google import genai
 from backend.services.vector_store import search_chunks
+
+logger = logging.getLogger(__name__)
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -143,6 +146,8 @@ def _retrieve_statement_passages(
     authoritative filter so same-named PDFs cannot be mixed.
     """
     grouped: dict[str, list[dict[str, Any]]] = {}
+    successful_queries = 0
+    retrieval_errors: list[Exception] = []
 
     for statement, queries in STATEMENT_QUERIES.items():
         passages: list[dict[str, Any]] = []
@@ -164,12 +169,14 @@ def _retrieve_statement_passages(
                     document_id=document_id,
                 )
             except Exception as exc:
-                print(
-                    f"Retrieval warning for {statement}: "
-                    f"{type(exc).__name__}: {exc}"
+                retrieval_errors.append(exc)
+                logger.exception(
+                    "Passage retrieval failed for statement %s",
+                    statement,
                 )
                 continue
 
+            successful_queries += 1
             added_for_query = 0
             for chunk in results:
                 # Defensive isolation check in addition to the vector-store filter.
@@ -199,9 +206,28 @@ def _retrieve_statement_passages(
                     break
 
         grouped[statement] = passages
-        print(
-            f"Retrieved {len(passages)} passages for {statement} "
-            f"from document {document_id[:12]}..."
+        logger.info(
+            "Retrieved %s passages for %s from document %s",
+            len(passages),
+            statement,
+            document_id[:12],
+        )
+
+    # An empty result is meaningful only when the vector store answered the
+    # retrieval requests. If every query failed, do not misreport an outage
+    # as a document with no financial evidence.
+    if successful_queries == 0 and retrieval_errors:
+        raise RuntimeError(
+            "Document passage retrieval failed. Check the vector database "
+            "and embedding service, then retry."
+        ) from retrieval_errors[-1]
+
+    if retrieval_errors:
+        logger.warning(
+            "Document extraction continued with partial retrieval: "
+            "%s of %s retrieval queries failed",
+            len(retrieval_errors),
+            successful_queries + len(retrieval_errors),
         )
 
     return grouped
