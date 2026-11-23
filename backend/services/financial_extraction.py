@@ -4,7 +4,7 @@ import re
 from typing import Any
 from dotenv import load_dotenv
 from google import genai
-from backend.services.vector_store import search_chunks
+from backend.services.vector_store import get_document_chunks, search_chunks
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -136,32 +136,111 @@ NUMERIC_FIELDS = {
 
 
 
+def _merge_overlapping_chunks(chunks: list[dict[str, Any]]) -> str:
+    """Reconstruct page text from overlapping chunks without duplicating overlap."""
+    merged = ""
+    for chunk in chunks:
+        text = str(chunk.get("text", "")).strip()
+        if not text:
+            continue
+        if not merged:
+            merged = text
+            continue
+        max_overlap = min(300, len(merged), len(text))
+        overlap = 0
+        for size in range(max_overlap, 0, -1):
+            if merged[-size:] == text[:size]:
+                overlap = size
+                break
+        merged += text[overlap:] if overlap else "\\n" + text
+    return merged.strip()
+
+
 def _retrieve_statement_passages(
     document_id: str,
     filename: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Retrieve statement passages belonging to one exact uploaded document.
+    """Rank complete pages from the uploaded PDF, not just semantic top-k chunks.
 
-    filename is retained for caller compatibility/display; document_id is the
-    authoritative filter so same-named PDFs cannot be mixed.
+    Financial tables are dense and often split across adjacent chunks. Rebuild
+    each page first, then combine lexical matches with vector-search page hits.
     """
-    grouped: dict[str, list[dict[str, Any]]] = {}
+    chunks = get_document_chunks(document_id)
+    if not chunks:
+        print(f"No indexed chunks found for document {document_id[:12]}...")
+        return {statement: [] for statement in STATEMENT_QUERIES}
 
-    for statement, queries in STATEMENT_QUERIES.items():
-        passages: list[dict[str, Any]] = []
-        seen = set()
-        limit = (
-            MAX_BALANCE_SHEET_PASSAGES
-            if statement == "balance_sheet"
-            else MAX_PASSAGES_PER_STATEMENT
+    pages: dict[int, list[dict[str, Any]]] = {}
+    for chunk in chunks:
+        if chunk.get("document_id") != document_id:
+            continue
+        page_number = int(chunk.get("page") or 0)
+        pages.setdefault(page_number, []).append(chunk)
+
+    page_passages = []
+    for page_number, page_chunks in pages.items():
+        ordered = sorted(
+            page_chunks,
+            key=lambda item: item.get("chunk_number") or 0,
         )
+        page_passages.append({
+            "text": _merge_overlapping_chunks(ordered),
+            "source": ordered[0].get("source", filename or "unknown"),
+            "document_id": document_id,
+            "page": page_number,
+            "chunk_number": 1,
+        })
 
+    # Terms cover common US and Indian financial-statement terminology.
+    statement_terms = {
+        "income_statement": [
+            "income statement", "statement of profit", "profit and loss",
+            "statement of operations", "revenue", "sales", "turnover",
+            "net income", "profit for the year", "gross profit",
+            "operating profit", "earnings",
+        ],
+        "balance_sheet": [
+            "balance sheet", "statement of financial position", "total assets",
+            "current assets", "current liabilities", "shareholders equity",
+            "stockholders equity", "total equity", "borrowings", "debt",
+            "trade payables", "reserves",
+        ],
+        "cash_flow": [
+            "cash flow", "cash flows", "operating activities",
+            "investing activities", "financing activities",
+            "capital expenditure", "property plant and equipment",
+        ],
+        "reporting_details": [
+            "financial statements", "year ended", "period ended",
+            "reporting period", "in thousands", "in millions", "in crores",
+            "rupees", "dollars", "consolidated",
+        ],
+    }
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for statement, queries in STATEMENT_QUERIES.items():
+        scores: dict[int, float] = {p["page"]: 0.0 for p in page_passages}
+
+        # Lexical scoring scans every reconstructed page, so a table page is
+        # considered even if vector similarity ranks it below unrelated prose.
+        for passage in page_passages:
+            text = passage["text"].casefold()
+            score = 0.0
+            for term in statement_terms[statement]:
+                count = text.count(term)
+                if count:
+                    score += min(count, 3) * (3.0 if " " in term else 1.0)
+            # Tables with many numeric cells are often the actual statement.
+            numeric_tokens = re.findall(r"(?<![A-Za-z])\\(?\\d[\\d,]*(?:\\.\\d+)?\\)?", text)
+            if len(numeric_tokens) >= 8:
+                score += 2.0
+            scores[passage["page"]] += score
+
+        # Semantic retrieval is used as a relevance signal, not as a hard
+        # truncation: its hits boost complete pages reconstructed above.
         for query in queries:
-            if len(passages) >= limit:
-                break
-
             try:
-                results = search_chunks(
+                hits = search_chunks(
                     query=query,
                     top_k=MAX_RESULTS_PER_QUERY,
                     document_id=document_id,
@@ -172,39 +251,35 @@ def _retrieve_statement_passages(
                     f"{type(exc).__name__}: {exc}"
                 )
                 continue
+            for hit in hits:
+                if hit.get("document_id") == document_id:
+                    page_number = int(hit.get("page") or 0)
+                    if page_number in scores:
+                        scores[page_number] += 5.0
 
-            added_for_query = 0
-            for chunk in results:
-                # Defensive isolation check in addition to the vector-store filter.
-                if chunk.get("document_id") != document_id:
-                    continue
+        ranked = sorted(
+            page_passages,
+            key=lambda item: (scores.get(item["page"], 0), -item["page"]),
+            reverse=True,
+        )
+        limit = 12 if statement == "balance_sheet" else 8
+        selected = [item for item in ranked if scores.get(item["page"], 0) > 0][:limit]
 
-                text = str(chunk.get("text", "")).strip()
-                if not text:
-                    continue
+        # If ranking signals are sparse (e.g. OCR text is fragmented), retain
+        # a small set of pages with the most numeric content instead of none.
+        if not selected:
+            numeric_ranked = sorted(
+                page_passages,
+                key=lambda item: len(re.findall(r"\\d", item["text"])),
+                reverse=True,
+            )
+            selected = numeric_ranked[:min(4, len(numeric_ranked))]
 
-                key = (
-                    chunk.get("document_id"),
-                    chunk.get("page"),
-                    text,
-                )
-                if key in seen:
-                    continue
-
-                seen.add(key)
-                passages.append(chunk)
-                added_for_query += 1
-
-                if (
-                    len(passages) >= limit
-                    or added_for_query >= MAX_PASSAGES_PER_QUERY
-                ):
-                    break
-
-        grouped[statement] = passages
+        grouped[statement] = selected
         print(
-            f"Retrieved {len(passages)} passages for {statement} "
-            f"from document {document_id[:12]}..."
+            f"Selected {len(selected)} complete pages for {statement} "
+            f"from {len(page_passages)} document pages "
+            f"({document_id[:12]}...)"
         )
 
     return grouped
