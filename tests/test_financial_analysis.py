@@ -75,3 +75,45 @@ def test_safe_divide_rejects_nan_and_infinity():
     assert safe_divide(float("nan"), 2) is None
     assert safe_divide(10, float("inf")) is None
     assert safe_divide(float("-inf"), 2) is None
+
+
+
+def test_indian_unit_labels_are_canonicalized_without_conversion():
+    from backend.services.financial_extraction import _normalize_units
+
+    assert _normalize_units("₹ in crore") == "crores"
+    assert _normalize_units("Rs. Lakhs") == "lakhs"
+    assert _normalize_units("INR millions") == "millions"
+    assert _normalize_units("in thousands") == "thousands"
+    assert _normalize_units(None) == "unspecified"
+
+
+def test_financial_ratios_are_scale_invariant_for_indian_units():
+    crore_result = calculate_financial_metrics({
+        "revenue": 1000,
+        "operating_income": 200,
+        "net_income": 100,
+        "current_assets": 300,
+        "current_liabilities": 150,
+        "total_debt": 400,
+        "total_equity": 800,
+        "total_assets": 1600,
+        "currency": "INR",
+        "units": "crores",
+    })
+    lakh_result = calculate_financial_metrics({
+        "revenue": 100000,
+        "operating_income": 20000,
+        "net_income": 10000,
+        "current_assets": 30000,
+        "current_liabilities": 15000,
+        "total_debt": 40000,
+        "total_equity": 80000,
+        "total_assets": 160000,
+        "currency": "INR",
+        "units": "lakhs",
+    })
+
+    assert crore_result["metrics"] == lakh_result["metrics"]
+    assert crore_result["units"] == "crores"
+    assert lakh_result["units"] == "lakhs"
