@@ -669,7 +669,7 @@ function App() {
 
             }}
 
-            className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition ${
+            className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition ${sidebarCollapsed ? 'justify-center px-2' : ''} ${
 
               activePage === 'Settings'
 
