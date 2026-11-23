@@ -34,7 +34,6 @@ def calculate_financial_metrics(
     """Calculate financial metrics from normalized statement values."""
 
     revenue = financials.get("revenue")
-    gross_profit = financials.get("gross_profit")
     operating_income = financials.get("operating_income")
     net_income = financials.get("net_income")
 
@@ -49,15 +48,6 @@ def calculate_financial_metrics(
     capital_expenditure = financials.get("capital_expenditure")
 
     metrics = {
-        # Keep these legacy metrics for API compatibility while exposing the
-        # core operating and balance-sheet ratios used by the current UI.
-        "gross_margin": safe_divide(gross_profit, revenue),
-        "free_cash_flow": (
-            operating_cash_flow - capital_expenditure
-            if _is_finite_number(operating_cash_flow)
-            and _is_finite_number(capital_expenditure)
-            else None
-        ),
         "operating_margin": safe_divide(operating_income, revenue),
         "net_profit_margin": safe_divide(net_income, revenue),
         "current_ratio": safe_divide(current_assets, current_liabilities),
@@ -66,13 +56,13 @@ def calculate_financial_metrics(
     }
 
     # Convert margins to percentages for easier interpretation.
-    for metric_name in ("gross_margin", "operating_margin", "net_profit_margin"):
+    for metric_name in ("operating_margin", "net_profit_margin"):
         value = metrics[metric_name]
         if value is not None:
             metrics[metric_name] = round(value * 100, 2)
 
     # Round ratios while preserving unavailable values.
-    for metric_name in ("current_ratio", "debt_to_equity", "debt_to_assets", "free_cash_flow"):
+    for metric_name in ("current_ratio", "debt_to_equity", "debt_to_assets"):
         value = metrics[metric_name]
         if value is not None:
             metrics[metric_name] = round(value, 2)
