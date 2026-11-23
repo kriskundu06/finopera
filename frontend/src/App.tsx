@@ -348,7 +348,9 @@ function App() {
 
       if (!uploadResponse.ok) throw new Error(uploadPayload.detail || `PDF upload failed (${uploadResponse.status}).`)
 
-      if (uploadPayload.ocr_required) throw new Error('This PDF contains no selectable text. OCR is not enabled for this document yet.')
+      const ocrWarning = Array.isArray(uploadPayload.ocr_skipped_pages)
+        ? uploadPayload.ocr_skipped_pages.length
+        : 0
 
       if (typeof uploadPayload.document_id !== 'string' || !uploadPayload.document_id) {
         throw new Error('The backend did not return a document ID. Please update the backend and try uploading again.')
@@ -372,7 +374,11 @@ function App() {
 
       setFinancialResult(analysisPayload)
 
-      setUploadMessage('Analysis complete. Dashboard metrics now use the uploaded report.')
+      setUploadMessage(
+        ocrWarning > 0
+          ? `Analysis complete, but OCR could not read ${ocrWarning} page(s). Results may be incomplete; check the original PDF.`
+          : 'Analysis complete. Dashboard metrics now use the uploaded report.'
+      )
 
       setActivePage('Financial analysis')
 
