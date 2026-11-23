@@ -6,8 +6,12 @@ from pathlib import Path
 
 import pymupdf
 import requests
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Body
+from fastapi.responses import FileResponse, StreamingResponse
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -261,6 +265,69 @@ def download_original_document(document_id: str):
         media_type="application/pdf",
         filename=f"{document_id}.pdf",
     )
+
+
+@app.post("/financial-analysis/report")
+def download_financial_analysis_report(payload: dict = Body(...)):
+    """Generate a portable PDF summary of extracted financials and their evidence."""
+    from io import BytesIO
+    from xml.sax.saxutils import escape
+
+    financials = payload.get("financials") or {}
+    evidence = payload.get("evidence") or {}
+    analysis = (payload.get("analysis") or {}).get("metrics") or {}
+    if not isinstance(financials, dict) or not financials:
+        raise HTTPException(status_code=400, detail="No financial figures are available to export.")
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=42, leftMargin=42, topMargin=42, bottomMargin=42)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph("FinOpera — Financial Analysis Report", styles["Title"]),
+        Spacer(1, 8),
+        Paragraph(f"Source: {escape(str(payload.get('filename') or 'Uploaded report'))}", styles["Normal"]),
+        Paragraph(f"Reporting period: {escape(str(payload.get('reporting_period') or 'Not identified'))}", styles["Normal"]),
+        Paragraph(f"Currency: {escape(str(payload.get('currency') or 'Unspecified'))} · Units: {escape(str(payload.get('units') or 'Unspecified'))}", styles["Normal"]),
+        Paragraph(f"Extraction status: {escape(str(payload.get('extraction_status') or 'unknown'))}", styles["Normal"]),
+        Spacer(1, 16),
+        Paragraph("Extracted financial figures", styles["Heading2"]),
+    ]
+    rows = [["Statement field", "Value", "Evidence"]]
+    for field, value in financials.items():
+        if field in {"currency", "units", "reporting_period"}:
+            continue
+        ref = evidence.get(field) if isinstance(evidence.get(field), dict) else {}
+        source = "Calculated" if str(ref.get("type", "")).startswith("calculated") else (
+            f"{ref.get('filename') or payload.get('filename') or 'Source'} · p. {ref.get('page')}"
+            if ref.get("page") else "Not verified"
+        )
+        rows.append([field.replace("_", " ").title(), "—" if value is None else str(value), source])
+    table = Table(rows, colWidths=[155, 115, 205], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#243047")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#CBD5E1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F1F5F9")]),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.extend([table, Spacer(1, 16), Paragraph("Calculated ratios", styles["Heading2"])])
+    ratio_rows = [["Metric", "Value"]] + [[key.replace("_", " ").title(), str(value)] for key, value in analysis.items()]
+    if len(ratio_rows) > 1:
+        ratios = Table(ratio_rows, colWidths=[235, 235], repeatRows=1)
+        ratios.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#243047")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#CBD5E1")),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("PADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(ratios)
+    story.extend([Spacer(1, 18), Paragraph("Important: Model-assisted extraction. Verify material figures against the original PDF before relying on them.", styles["Italic"])])
+    doc.build(story)
+    buffer.seek(0)
+    return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="finopera-financial-analysis.pdf"'})
 
 
 @app.post("/search")
