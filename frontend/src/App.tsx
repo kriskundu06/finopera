@@ -380,7 +380,7 @@ function App() {
 
       setUploadMessage(
         ocrWarning > 0
-          ? `Analysis complete, but OCR could not read ${ocrWarning} page(s). Results may be incomplete; check the original PDF.`
+          ? `Analysis complete. OCR was unavailable on ${ocrWarning} page(s); original page images were retained for visual extraction.`
           : 'Analysis complete. Dashboard metrics now use the uploaded report.'
       )
 
