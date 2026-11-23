@@ -1235,6 +1235,30 @@ def extract_financials(
     if financials.get("total_debt") is None and field_status.get("total_debt") == "verified":
         field_status["total_debt"] = "insufficient_components"
 
+    # The balance-sheet identity allows liabilities to be calculated only when
+    # assets and equity are both supported by the same statement page.
+    if (
+        financials.get("total_liabilities") is None
+        and isinstance(financials.get("total_assets"), (int, float))
+        and isinstance(financials.get("total_equity"), (int, float))
+        and evidence.get("total_assets")
+        and evidence.get("total_equity")
+        and evidence["total_assets"].get("filename") == evidence["total_equity"].get("filename")
+        and evidence["total_assets"].get("page") == evidence["total_equity"].get("page")
+    ):
+        financials["total_liabilities"] = (
+            financials["total_assets"] - financials["total_equity"]
+        )
+        evidence["total_liabilities"] = {
+            "type": "calculated",
+            "formula": "total_assets - total_equity",
+            "inputs": {
+                "total_assets": evidence["total_assets"],
+                "total_equity": evidence["total_equity"],
+            },
+        }
+        field_status["total_liabilities"] = "calculated"
+
     for field in NUMERIC_FIELDS:
         if financials.get(field) is not None and evidence.get(field) is not None:
             field_status[field] = (
