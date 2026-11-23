@@ -1019,53 +1019,44 @@ def _apply_balance_sheet_fallback(
 
 
 
-        if (
+        if financials.get("units") in (None, "unspecified"):
+            unit_patterns = [
+                (r"\\bin\\s+thousands?\\b|\\b000s\\b", "thousands"),
+                (r"\\bin\\s+millions?\\b", "millions"),
+                (r"\\bin\\s+billions?\\b", "billions"),
+                (r"\\bin\\s+crores?\\b|₹\\s*(?:in\\s*)?crores?", "crores"),
+                (r"\\bin\\s+lakhs?\\b|₹\\s*(?:in\\s*)?lakhs?", "lakhs"),
+            ]
+            for pattern, unit_name in unit_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    financials["units"] = unit_name
+                    evidence["units"] = {
+                        "filename": str(passage.get("source", "unknown")),
+                        "page": passage.get("page", "unknown"),
+                        "quote": match.group(0),
+                        "type": "document_heading",
+                    }
+                    break
 
-            financials.get("units") in (None, "unspecified")
-
-            and re.search(r"\bin millions\b", text, re.IGNORECASE)
-
-        ):
-
-            financials["units"] = "millions"
-
-            evidence["units"] = {
-
-                "filename": str(passage.get("source", "unknown")),
-
-                "page": passage.get("page", "unknown"),
-
-                "quote": "in millions",
-
-                "type": "document_heading",
-
-            }
-
-
-
-        if (
-
-            financials.get("currency") in (None, "unspecified")
-
-            and re.search(r"\bConsolidated Balance Sheets\b", text, re.IGNORECASE)
-
-            and "$" in text
-
-        ):
-
-            financials["currency"] = "USD"
-
-            evidence["currency"] = {
-
-                "filename": str(passage.get("source", "unknown")),
-
-                "page": passage.get("page", "unknown"),
-
-                "quote": "$",
-
-                "type": "document_currency_symbol",
-
-            }
+        if financials.get("currency") in (None, "unspecified"):
+            currency_patterns = [
+                (r"\\bINR\\b|₹|\\bRs\\.?\\b", "INR"),
+                (r"US\\$|\\bUSD\\b|\\$", "USD"),
+                (r"€|\\bEUR\\b", "EUR"),
+                (r"£|\\bGBP\\b", "GBP"),
+            ]
+            for pattern, currency_code in currency_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    financials["currency"] = currency_code
+                    evidence["currency"] = {
+                        "filename": str(passage.get("source", "unknown")),
+                        "page": passage.get("page", "unknown"),
+                        "quote": match.group(0),
+                        "type": "document_currency_symbol",
+                    }
+                    break
 
 
 
@@ -1220,7 +1211,7 @@ def extract_financials(
 
 
     _apply_balance_sheet_fallback(
-        grouped.get("balance_sheet", []),
+        grouped.get("balance_sheet", []) + grouped.get("reporting_details", []),
         financials,
         evidence,
         document_id,
