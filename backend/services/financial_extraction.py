@@ -1097,6 +1097,15 @@ def extract_financials(
 
 
 
+    # Keep the API response focused on the eight core figures. Long-term debt
+    # may be used internally to calculate total debt, but is not exposed as a
+    # separate headline figure.
+    financials = {
+        key: value for key, value in financials.items()
+        if key in NUMERIC_FIELDS or key in {"currency", "units", "reporting_period"}
+    }
+    evidence = {key: value for key, value in evidence.items() if key in financials}
+
     # Final integrity audit: never return a populated extracted field without evidence.
     for field in NUMERIC_FIELDS:
         if financials.get(field) is not None and evidence.get(field) is None:
