@@ -1,7 +1,7 @@
 
 
 import { useRef, useState } from 'react'
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
+import { CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 import {
 
@@ -474,6 +474,14 @@ function App() {
   const financials = financialResult?.financials ?? {}
 
   const analysis = financialResult?.analysis?.metrics ?? {}
+
+  const statementLineData = [
+    { name: 'Revenue', value: financials.revenue },
+    { name: 'Gross profit', value: financials.gross_profit },
+    { name: 'Operating income', value: financials.operating_income },
+    { name: 'Net income', value: financials.net_income },
+  ].filter((point): point is { name: string; value: number } => typeof point.value === 'number' && Number.isFinite(point.value))
+
 
   const currency = financialResult?.currency || String(financials.currency || 'USD')
 
@@ -1172,8 +1180,8 @@ function App() {
               ) : <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-xs text-slate-500">Verified total assets and equity are required to render this chart.</div>}
             </article>
             <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
-              <h3 className="text-sm font-semibold text-white">Performance trend</h3><p className="mt-1 text-xs text-slate-500">Historical revenue and earnings</p>
-              <div className="mt-5 flex min-h-[210px] flex-col items-center justify-center rounded-xl border border-dashed border-white/10 px-6 text-center"><Activity size={24} className="text-sky-300"/><p className="mt-3 text-sm text-slate-300">Historical series unavailable</p><p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">A trend line requires multiple comparable reporting periods. This upload is treated as one period; no sample data is fabricated.</p></div>
+              <h3 className="text-sm font-semibold text-white">Performance trend</h3><p className="mt-1 text-xs text-slate-500">Income statement comparison · reported values, not a time series</p>
+              <div className="mt-4 h-[230px]">{statementLineData.length >= 2 ? <ResponsiveContainer width="100%" height="100%"><LineChart data={statementLineData} margin={{top:12,right:12,left:4,bottom:4}}><CartesianGrid stroke="#273449" strokeDasharray="3 5" vertical={false}/><XAxis dataKey="name" tick={{fill:'#94a3b8',fontSize:10}} tickLine={false} axisLine={false}/><YAxis tick={{fill:'#94a3b8',fontSize:10}} tickLine={false} axisLine={false}/><Tooltip formatter={(value)=>formatAmount(Number(value),currency,units)} contentStyle={{background:'#111c2e',border:'1px solid #334155',borderRadius:12}}/><Line type="monotone" dataKey="value" name="Reported amount" stroke="#a78bfa" strokeWidth={3} dot={{r:5,fill:'#38bdf8',stroke:'#0e1422',strokeWidth:2}} activeDot={{r:7,fill:'#a3e635'}}/></LineChart></ResponsiveContainer> : <div className="flex h-full flex-col items-center justify-center rounded-xl border border-dashed border-white/10 px-6 text-center"><Activity size={24} className="text-sky-300"/><p className="mt-3 text-sm text-slate-300">Not enough verified income-statement values</p><p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">At least two verified amounts are required to draw this comparison. No sample values are shown.</p></div>}</div>
             </article>
           </section>
 
