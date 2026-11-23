@@ -675,7 +675,10 @@ def export_comparison_report(payload: dict = Body(...)):
             "—" if not isinstance(r.get("financials", {}).get(field), (int, float))
             else f'{r["financials"][field]:,.2f}' for r in reports
         ])
-    table = Table(rows, repeatRows=1)
+    usable_width = A4[0] - 64
+    metric_width = 112
+    period_width = (usable_width - metric_width) / max(1, len(periods))
+    table = Table(rows, colWidths=[metric_width] + [period_width] * len(periods), repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#243047")),
         ("TEXTCOLOR", (0,0), (-1,0), colors.white),
