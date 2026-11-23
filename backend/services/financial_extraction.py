@@ -124,6 +124,52 @@ def _merge_overlapping_chunks(chunks: list[dict[str, Any]]) -> str:
     return merged.strip()
 
 
+def _select_statement_pages(
+    page_passages: list[dict[str, Any]],
+    scores: dict[int, float],
+    statement: str,
+) -> list[dict[str, Any]]:
+    """Select relevant text pages first, then use visual pages as fallback."""
+    limit = 12 if statement == "balance_sheet" else 8
+    ranked = sorted(
+        page_passages,
+        key=lambda item: (scores.get(item["page"], 0), -item["page"]),
+        reverse=True,
+    )
+    selected = [
+        item for item in ranked
+        if scores.get(item["page"], 0) > 0
+    ][:limit]
+    selected_pages = {item["page"] for item in selected}
+
+    # Image availability is not evidence of statement relevance. Use visual
+    # pages only to fill a limited number of remaining candidate slots.
+    if len(selected) < limit:
+        visual_fallback = [
+            item for item in page_passages
+            if item["page"] not in selected_pages
+            and item.get("image_path")
+            and Path(item["image_path"]).is_file()
+        ]
+        visual_fallback.sort(
+            key=lambda item: (
+                len(re.findall(r"\\d", item.get("text", ""))),
+                -item["page"],
+            ),
+            reverse=True,
+        )
+        selected.extend(visual_fallback[:min(4, limit - len(selected))])
+
+    if not selected:
+        numeric_ranked = sorted(
+            page_passages,
+            key=lambda item: len(re.findall(r"\\d", item.get("text", ""))),
+            reverse=True,
+        )
+        selected = numeric_ranked[:min(4, len(numeric_ranked))]
+    return selected
+
+
 def _retrieve_statement_passages(
     document_id: str,
     filename: str | None = None,
