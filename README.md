@@ -80,18 +80,17 @@ Install Python dependencies:
 pip install -r requirements.txt
 ```
 
-#### OCR prerequisite for scanned PDFs
+#### Scanned PDFs and financial tables
 
-FinOpera uses PyMuPDF's OCR integration, which requires the **Tesseract OCR
-engine** to be installed separately from Python packages. On Windows:
+FinOpera preserves high-resolution images of pages with sparse text or
+embedded tables and sends those original page images to Gemini's vision-capable
+model during financial extraction. This lets the model inspect table headings,
+row labels, reporting periods and amounts instead of relying only on flattened
+OCR text.
 
-1. Install Tesseract OCR for Windows.
-2. Ensure `tesseract.exe` is available on your system `PATH`.
-3. Restart the terminal / VS Code after updating `PATH`.
-4. Verify it with `tesseract --version`.
-
-If Tesseract is missing, scanned pages cannot be read reliably. Text-based PDFs
-can still be processed without OCR.
+Tesseract OCR is optional but recommended: when installed, it adds searchable
+text that helps retrieve the right pages. If Tesseract is unavailable, the
+original page images are still retained for Gemini Vision extraction.
 
 Create your local `.env` file by copying `.env.example`, then set your own Gemini API key and the model name supported by your project.
 
