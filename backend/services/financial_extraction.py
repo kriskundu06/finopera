@@ -682,7 +682,10 @@ def _extract_statement(
             and bool(quote.strip())
             and matched_source is not None
             and _normalize_text(quote) in _normalize_text(matched_source["text"])
-            and _quote_contains_value(value, quote)
+            and (
+                field not in NUMERIC_FIELDS
+                or _quote_contains_value(value, quote)
+            )
         )
 
         # A value without a valid source and matching quote is not returned.
