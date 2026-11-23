@@ -317,15 +317,9 @@ def _build_context(
 
 
 
-        excerpt_limit = (
-
-            MAX_CHARS_PER_PASSAGE
-
-            if statement == "balance_sheet"
-
-            else 4000
-
-        )
+        # Keep the full financial-table region. A row label and its amount
+        # can be far apart in text extracted from complex multi-column PDFs.
+        excerpt_limit = 10000
 
         excerpt = raw_text[:excerpt_limit]
 
@@ -603,8 +597,27 @@ DOCUMENT EXCERPTS:
 
 
 def _normalize_text(value: str) -> str:
-
     return re.sub(r"\W+", "", value.casefold(), flags=re.UNICODE)
+
+
+def _quote_contains_value(value: int | float, quote: str) -> bool:
+    """Require the extracted amount itself to appear in its evidence quote."""
+    number_pattern = re.compile(
+        r"\\(?\\s*-?\\d[\\d,]*(?:\\.\\d+)?\\s*\\)?"
+    )
+    for match in number_pattern.finditer(quote):
+        token = match.group(0).strip()
+        negative = token.startswith("(") and token.endswith(")")
+        token = token.strip("()").replace(",", "")
+        try:
+            quoted_number = float(token)
+        except ValueError:
+            continue
+        if negative:
+            quoted_number = -quoted_number
+        if abs(quoted_number - float(value)) <= max(1e-8, abs(float(value)) * 1e-10):
+            return True
+    return False
 
 
 
@@ -667,8 +680,8 @@ def _extract_statement(
         quote_is_grounded = (
             isinstance(quote, str)
             and bool(quote.strip())
-            and matched_source is not None
             and _normalize_text(quote) in _normalize_text(matched_source["text"])
+            and _quote_contains_value(value, quote)
         )
 
         # A value without a valid source and matching quote is not returned.
