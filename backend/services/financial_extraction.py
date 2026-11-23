@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any
 from dotenv import load_dotenv
 from google import genai
@@ -439,35 +440,44 @@ DOCUMENT EXCERPTS:
 
 
 
-    try:
+    response = None
+    max_attempts = 3
 
-        response = client.models.generate_content(
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config={
+                    "temperature": 0,
+                    "response_mime_type": "application/json",
+                    "max_output_tokens": 2600,
+                },
+            )
+            break
+        except Exception as exc:
+            # Retry only transient provider/service failures. Invalid requests,
+            # authentication failures and malformed prompts should fail fast.
+            status_code = getattr(exc, "code", None) or getattr(
+                exc, "status_code", None
+            )
+            transient = status_code in {429, 500, 502, 503, 504}
+            if not transient or attempt == max_attempts:
+                raise RuntimeError(
+                    f"Gemini request failed for {statement}: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
 
-            model=GEMINI_MODEL,
+            delay_seconds = 2 ** (attempt - 1)
+            logger.warning(
+                "Transient Gemini failure for %s (attempt %s/%s, status=%s); "
+                "retrying in %s seconds",
+                statement, attempt, max_attempts, status_code, delay_seconds,
+            )
+            time.sleep(delay_seconds)
 
-            contents=prompt,
-
-            config={
-
-                "temperature": 0,
-
-                "response_mime_type": "application/json",
-
-                "max_output_tokens": 2600,
-
-            },
-
-        )
-
-    except Exception as exc:
-
-        raise RuntimeError(
-
-            f"Gemini request failed for {statement}: "
-
-            f"{type(exc).__name__}: {exc}"
-
-        ) from exc
+    if response is None:
+        raise RuntimeError(f"Gemini returned no response for {statement}.")
 
 
 
@@ -1038,38 +1048,34 @@ def extract_financials(
 
 
 
-    for statement, fields in STATEMENT_FIELDS.items():
+    statement_errors: dict[str, str] = {}
 
+    for statement, fields in STATEMENT_FIELDS.items():
         passages = grouped.get(statement, [])
 
-
-
         if not passages:
-
             for field in fields:
-
                 financials[field] = None
-
                 evidence[field] = None
-
             continue
 
-
-
-        values, field_evidence, source_map = _extract_statement(
-
-            statement,
-
-            passages,
-
-        )
-
-
+        try:
+            values, field_evidence, source_map = _extract_statement(
+                statement,
+                passages,
+            )
+        except RuntimeError as exc:
+            # Keep successful statements; a temporary provider outage for one
+            # statement must not discard already extracted, evidenced values.
+            logger.exception("Extraction failed for statement %s", statement)
+            statement_errors[statement] = str(exc)
+            for field in fields:
+                financials[field] = None
+                evidence[field] = None
+            continue
 
         financials.update(values)
-
         evidence.update(field_evidence)
-
         all_sources.extend(source_map)
 
 
@@ -1091,12 +1097,11 @@ def extract_financials(
             "reporting_period": None,
 
             "message": (
-
                 "No relevant financial passages found. Upload and index a "
-
                 "financial report first."
-
             ),
+            "extraction_status": "failed" if statement_errors else "no_evidence",
+            "statement_errors": statement_errors,
 
         }
 
@@ -1234,12 +1239,18 @@ def extract_financials(
         "reporting_period": reporting_period,
 
         "sources": unique_sources,
+        "extraction_status": "partial" if statement_errors else "completed",
+        "statement_errors": statement_errors,
 
         "message": (
 
-            "Extraction completed. Verify figures and supporting evidence "
-
-            "against the original statements before relying on the analysis."
+            (
+                "Extraction partially completed. Some statements could not be "
+                "processed; verify available figures and evidence against the PDF."
+                if statement_errors else
+                "Extraction completed. Verify figures and supporting evidence "
+                "against the original statements before relying on the analysis."
+            )
 
         ),
 
