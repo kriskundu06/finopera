@@ -140,3 +140,38 @@ def test_extraction_status_is_completed_only_when_all_core_fields_are_verified()
 
     assert status["extraction_status"] == "completed"
     assert status["missing_fields"] == []
+
+
+def test_statement_relevance_prefers_financial_statement_tables():
+    from backend.services.financial_extraction import _statement_relevance_score
+
+    income = "Consolidated Statement of Profit and Loss Revenue from operations Profit for the period"
+    balance = "Consolidated Balance Sheet Total current assets Total current liabilities Total assets Total equity"
+
+    assert _statement_relevance_score(income, "income_statement") >= 3
+    assert _statement_relevance_score(balance, "balance_sheet") >= 4
+    assert _statement_relevance_score("Chairman's letter and business highlights", "balance_sheet") == 0
+
+
+def test_document_statement_retrieval_is_scoped_and_prefers_labelled_chunks(monkeypatch):
+    import backend.services.financial_extraction as extraction
+
+    document_id = "a" * 64
+    chunks = [
+        {"document_id": document_id, "page": 22, "chunk_number": 1,
+         "text": "Consolidated Balance Sheet Total current assets Total current liabilities Total assets Total equity"},
+        {"document_id": document_id, "page": 4, "chunk_number": 1,
+         "text": "Chairman's letter and business highlights"},
+        {"document_id": "b" * 64, "page": 22, "chunk_number": 1,
+         "text": "Consolidated Balance Sheet Total current assets Total current liabilities Total assets Total equity"},
+    ]
+    monkeypatch.setattr(extraction, "get_document_chunks", lambda _: chunks)
+
+    grouped = extraction._retrieve_statement_passages(document_id)
+
+    assert len(grouped["balance_sheet"]) == 1
+    assert grouped["balance_sheet"][0]["page"] == 22
+    assert all(
+        chunk["document_id"] == document_id
+        for passages in grouped.values() for chunk in passages
+    )
