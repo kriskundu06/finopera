@@ -194,3 +194,47 @@ def search_chunks(
         )
 
     return matches
+
+
+
+def get_document_chunks(document_id: str) -> list[dict[str, Any]]:
+    """Return every indexed chunk for one exact document, in PDF order.
+
+    Financial statement retrieval uses this deterministic document-scoped
+    listing so dense tables are not lost merely because their embeddings rank
+    below narrative passages.
+    """
+    if not isinstance(document_id, str) or not document_id.strip():
+        raise ValueError("document_id must be a non-empty string.")
+
+    collection = get_collection()
+    if collection.count() == 0:
+        return []
+
+    result = collection.get(
+        where={"document_id": document_id},
+        include=["documents", "metadatas"],
+    )
+    documents = result.get("documents") or []
+    metadatas = result.get("metadatas") or []
+    chunks = []
+
+    for index, text in enumerate(documents):
+        metadata = metadatas[index] or {}
+        if metadata.get("document_id") != document_id:
+            continue
+        chunks.append({
+            "text": text or "",
+            "source": metadata.get("source", "unknown"),
+            "document_id": document_id,
+            "page": metadata.get("page"),
+            "chunk_number": metadata.get("chunk_number", 0),
+        })
+
+    return sorted(
+        chunks,
+        key=lambda item: (
+            item.get("page") if isinstance(item.get("page"), int) else 0,
+            item.get("chunk_number") if isinstance(item.get("chunk_number"), int) else 0,
+        ),
+    )
