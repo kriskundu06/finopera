@@ -77,6 +77,7 @@ def index_chunks(
     metadatas = [
         {
             "source": str(chunk["metadata"]["source"]),
+            "document_id": str(chunk["metadata"]["document_id"]),
             "page": int(chunk["metadata"]["page"]),
             "chunk_number": int(chunk["metadata"]["chunk_number"]),
         }
@@ -98,6 +99,7 @@ def search_chunks(
     top_k: int = 5,
     source: str | None = None,
     page: int | None = None,
+    document_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Retrieve relevant chunks by semantic similarity.
@@ -123,7 +125,8 @@ def search_chunks(
 
     if source is not None:
         conditions.append({"source": source})
-
+    if document_id is not None:
+        conditions.append({"document_id": document_id})    
     if page is not None:
         conditions.append({"page": page})
 
@@ -183,6 +186,7 @@ def search_chunks(
             {
                 "text": text,
                 "source": metadata.get("source", "unknown"),
+                "document_id": metadata.get("document_id"),
                 "page": metadata.get("page"),
                 "chunk_number": metadata.get("chunk_number"),
                 "distance": distances[0][index],

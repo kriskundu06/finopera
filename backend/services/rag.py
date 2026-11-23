@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any
 
@@ -5,17 +6,24 @@ from dotenv import load_dotenv
 from google import genai
 
 from backend.services.vector_store import search_chunks
+from backend.services.semantic_cache import lookup_answer, store_answer
 
 load_dotenv()
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+logger = logging.getLogger(__name__)
 
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 
-def answer_question(question: str, top_k: int = 5) -> dict[str, Any]:
-    """Answer a question using retrieved document passages and Gemini."""
+def answer_question(
+    question: str,
+    top_k: int = 5,
+    document_id: str | None = None,
+) -> dict[str, Any]:
+    """Answer a document-scoped question, using semantic cache when safe."""
 
     if client is None:
         raise RuntimeError(
@@ -23,18 +31,52 @@ def answer_question(question: str, top_k: int = 5) -> dict[str, Any]:
         )
 
     question = question.strip()
+
     if not question:
         raise ValueError("Question cannot be empty.")
 
-    chunks = search_chunks(query=question, top_k=top_k)
+    if not document_id or not document_id.strip():
+        raise ValueError("A document ID is required.")
+
+    document_id = document_id.strip()
+
+    # Cache failures must never make the normal RAG workflow unavailable.
+    try:
+        cached = lookup_answer(
+            question=question,
+            document_id=document_id,
+            model=GEMINI_MODEL,
+        )
+    except Exception:
+        logger.exception("Semantic cache lookup failed; falling back to normal RAG.")
+        cached = None
+
+    if cached is not None:
+        logger.info(
+            "Semantic cache HIT for document %s (similarity=%s)",
+            document_id,
+            cached.get("cache", {}).get("similarity"),
+        )
+        return cached
+
+    logger.info("Semantic cache MISS for document %s", document_id)
+
+    # Retrieve passages exclusively from the selected PDF.
+    chunks = search_chunks(
+        query=question,
+        top_k=top_k,
+        document_id=document_id,
+    )
 
     if not chunks:
         return {
             "answer": (
-                "I couldn't find relevant passages in the indexed documents. "
+                "I couldn't find relevant passages in the selected document. "
                 "Try a more specific question or upload the relevant report."
             ),
             "sources": [],
+            "model": GEMINI_MODEL,
+            "cache": {"hit": False, "stored": False, "reason": "no_evidence"},
         }
 
     context_parts = []
@@ -50,15 +92,13 @@ def answer_question(question: str, top_k: int = 5) -> dict[str, Any]:
             f"[{source_id}] File: {filename}; Page: {page}\n{text}"
         )
 
-        sources.append(
-            {
-                "source_id": source_id,
-                "source": filename,
-                "page": page,
-                "chunk_number": chunk.get("chunk_number"),
-                "text": text,
-            }
-        )
+        sources.append({
+            "source_id": source_id,
+            "source": filename,
+            "page": page,
+            "chunk_number": chunk.get("chunk_number"),
+            "text": text,
+        })
 
     prompt = f"""
 You are an AI due-diligence assistant analyzing company documents.
@@ -93,8 +133,34 @@ USER QUESTION:
     if not answer:
         raise RuntimeError("Gemini returned an empty response.")
 
-    return {
+    result = {
         "answer": answer,
         "sources": sources,
         "model": GEMINI_MODEL,
     }
+
+    # Cache only successful answers grounded in retrieved document evidence.
+    # A cache storage failure must not discard the valid Gemini response.
+    try:
+        cache_id = store_answer(
+            question=question,
+            document_id=document_id,
+            answer=answer,
+            sources=sources,
+            model=GEMINI_MODEL,
+        )
+        result["cache"] = {
+            "hit": False,
+            "stored": True,
+            "cache_id": cache_id,
+        }
+        logger.info("Stored semantic cache entry %s", cache_id)
+    except Exception:
+        logger.exception("Could not store semantic cache entry.")
+        result["cache"] = {
+            "hit": False,
+            "stored": False,
+            "reason": "cache_store_failed",
+        }
+
+    return result

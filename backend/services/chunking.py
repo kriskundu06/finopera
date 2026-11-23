@@ -5,15 +5,11 @@ from typing import Any
 def chunk_pages(
     pages: list[dict[str, Any]],
     filename: str,
+    document_id: str,
     chunk_size: int = 1200,
     overlap: int = 200,
 ) -> list[dict[str, Any]]:
-    """
-    Split extracted PDF page text into smaller chunks.
-
-    Each chunk retains its source filename and page number.
-    Chunk size and overlap are measured in characters.
-    """
+    """Split PDF pages into chunks with stable document identity."""
 
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive.")
@@ -45,11 +41,12 @@ def chunk_pages(
 
             chunks.append({
                 "chunk_id": (
-                    f"{filename}::page_{page_number}::chunk_{chunk_number}"
+                    f"{document_id}::page_{page_number}::chunk_{chunk_number}"
                 ),
                 "text": chunk_text,
                 "metadata": {
                     "source": filename,
+                    "document_id": document_id,
                     "page": page_number,
                     "chunk_number": chunk_number,
                 },
