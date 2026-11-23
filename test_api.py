@@ -1,6 +1,8 @@
 
 from fastapi.testclient import TestClient
 
+import backend.main as main_module
+
 from backend.main import app
 
 client = TestClient(app)
@@ -78,3 +80,55 @@ def test_ask_rejects_empty_question():
     response = client.post("/ask", json={"question": ""})
 
     assert response.status_code == 422
+
+
+
+def test_financial_extract_returns_safe_error_when_provider_is_unavailable(monkeypatch):
+    def fail_extraction(**kwargs):
+        raise RuntimeError("Gemini request failed: private provider detail")
+
+    monkeypatch.setattr(main_module, "extract_financials", fail_extraction)
+    response = client.post(
+        "/financial-extract",
+        params={"document_id": "a" * 64},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == (
+        "The financial extraction provider could not complete the request. Please retry."
+    )
+    assert "private provider detail" not in response.text
+
+
+def test_financial_analysis_returns_safe_error_when_provider_is_unavailable(monkeypatch):
+    def fail_extraction(**kwargs):
+        raise RuntimeError("Gemini request failed: private provider detail")
+
+    monkeypatch.setattr(main_module, "extract_financials", fail_extraction)
+    response = client.post(
+        "/financial-analyze-document",
+        params={"document_id": "b" * 64},
+    )
+
+    assert response.status_code == 502
+    assert "private provider detail" not in response.text
+
+
+def test_ask_returns_safe_error_when_provider_is_unavailable(monkeypatch):
+    def fail_answer(**kwargs):
+        raise RuntimeError("The AI answer provider could not complete the request.")
+
+    monkeypatch.setattr(main_module, "answer_question", fail_answer)
+    response = client.post(
+        "/ask",
+        json={
+            "question": "Summarize the report",
+            "document_id": "c" * 64,
+            "top_k": 5,
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == (
+        "AI Analyst could not complete the request. Please try again."
+    )
