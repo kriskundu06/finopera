@@ -334,9 +334,12 @@ def analyze_financial_document(
     return {
         "document_id": document_id,
         "message": (
-            "Financial analysis completed. "
-            "Verify figures against the source."
+            extraction.get("message")
+            or "Financial analysis completed. Verify figures against the source."
         ),
+        "extraction_status": extraction.get("extraction_status", "completed"),
+        "statement_errors": extraction.get("statement_errors", {}),
+        "verified_fields": extraction.get("verified_fields", []),
         "financials": financials,
         "analysis": analysis,
         "evidence": extraction.get("evidence", {}),
