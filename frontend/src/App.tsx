@@ -282,6 +282,10 @@ function App() {
 
   const [uploadMessage, setUploadMessage] = useState('')
 
+  const [isExporting, setIsExporting] = useState(false)
+
+  const [exportError, setExportError] = useState('')
+
   const [documentInfo, setDocumentInfo] = useState<{
     filename: string
     document_id: string
@@ -404,7 +408,9 @@ function App() {
   }
 
   async function downloadAnalysisPdf() {
-    if (!financialResult || !documentInfo) return
+    if (!financialResult || !documentInfo || isExporting) return
+    setIsExporting(true)
+    setExportError('')
     try {
       const response = await fetch(`${API_BASE_URL}/financial-analysis/report`, {
         method: 'POST',
@@ -434,7 +440,9 @@ function App() {
       link.remove()
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : 'Could not download the analysis PDF.')
+      setExportError(error instanceof Error ? error.message : 'Could not download the analysis PDF.')
+    } finally {
+      setIsExporting(false)
     }
   }
 
@@ -962,8 +970,9 @@ function App() {
               {!financialResult ? <div className="rounded-2xl border border-dashed border-white/10 bg-[#0e1422] p-10 text-center text-sm text-slate-500">Upload and analyze a report to view its financial statements.</div> : <>
                 <div className="flex flex-wrap gap-3">
                   <button type="button" onClick={downloadOriginalPdf} disabled={!documentInfo?.document_id} className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2.5 text-xs font-medium text-slate-200 transition hover:border-lime-400/40 hover:bg-white/[.04] disabled:opacity-40"><Download size={15}/> Download original PDF</button>
-                  <button type="button" onClick={downloadAnalysisPdf} className="inline-flex items-center gap-2 rounded-xl bg-lime-500 px-4 py-2.5 text-xs font-medium text-white transition hover:bg-lime-400"><FileText size={15}/> Export financial analysis</button>
+                  <button type="button" onClick={downloadAnalysisPdf} disabled={isExporting} className="inline-flex items-center gap-2 rounded-xl bg-lime-500 px-4 py-2.5 text-xs font-medium text-white transition hover:bg-lime-400 disabled:cursor-wait disabled:opacity-60"><FileText size={15}/> {isExporting ? 'Generating PDF…' : 'Export financial analysis'}</button>
                 </div>
+                {exportError && <p role="alert" className="rounded-xl border border-rose-400/20 bg-rose-400/[.06] px-4 py-3 text-xs text-rose-300">{exportError}</p>}
                 <div className={`flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-start sm:justify-between ${financialResult.extraction_status === 'partial' ? 'border-amber-400/25 bg-amber-400/[.06]' : financialResult.extraction_status === 'failed' || financialResult.extraction_status === 'no_evidence' ? 'border-rose-400/25 bg-rose-400/[.06]' : 'border-emerald-400/20 bg-emerald-400/[.05]'}`}>
                   <div className="flex items-start gap-3">
                     {financialResult.extraction_status === 'partial' ? <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-300"/> : financialResult.extraction_status === 'failed' || financialResult.extraction_status === 'no_evidence' ? <ShieldAlert size={18} className="mt-0.5 shrink-0 text-rose-300"/> : <Activity size={18} className="mt-0.5 shrink-0 text-emerald-300"/>}
