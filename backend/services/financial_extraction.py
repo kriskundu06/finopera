@@ -152,7 +152,7 @@ def _merge_overlapping_chunks(chunks: list[dict[str, Any]]) -> str:
             if merged[-size:] == text[:size]:
                 overlap = size
                 break
-        merged += text[overlap:] if overlap else "\\n" + text
+        merged += text[overlap:] if overlap else "\n" + text
     return merged.strip()
 
 
@@ -235,7 +235,7 @@ def _retrieve_statement_passages(
                 if count:
                     score += min(count, 3) * (3.0 if " " in term else 1.0)
             # Tables with many numeric cells are often the actual statement.
-            numeric_tokens = re.findall(r"(?<![A-Za-z])\\(?\\d[\\d,]*(?:\\.\\d+)?\\)?", text)
+            numeric_tokens = re.findall(r"(?<![A-Za-z])\(?\d[\d,]*(?:\.\d+)?\)?", text)
             if len(numeric_tokens) >= 8:
                 score += 2.0
             scores[passage["page"]] += score
@@ -274,7 +274,7 @@ def _retrieve_statement_passages(
         if not selected:
             numeric_ranked = sorted(
                 page_passages,
-                key=lambda item: len(re.findall(r"\\d", item["text"])),
+                key=lambda item: len(re.findall(r"\d", item["text"])),
                 reverse=True,
             )
             selected = numeric_ranked[:min(4, len(numeric_ranked))]
@@ -603,7 +603,7 @@ def _normalize_text(value: str) -> str:
 def _quote_contains_value(value: int | float, quote: str) -> bool:
     """Require the extracted amount itself to appear in its evidence quote."""
     number_pattern = re.compile(
-        r"\\(?\\s*-?\\d[\\d,]*(?:\\.\\d+)?\\s*\\)?"
+        r"\(?\s*-?\d[\d,]*(?:\.\d+)?\s*\)?"
     )
     for match in number_pattern.finditer(quote):
         token = match.group(0).strip()
