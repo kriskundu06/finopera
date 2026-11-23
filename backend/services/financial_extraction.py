@@ -202,6 +202,12 @@ def _retrieve_statement_passages(
                 count = text.count(term)
                 if count:
                     score += min(count, 3) * (3.0 if " " in term else 1.0)
+            # A preserved image is a real visual source even when OCR
+            # returns no useful text. Give it a modest candidate boost without
+            # injecting fake statement keywords into the searchable text.
+            if passage.get("image_path") and Path(passage["image_path"]).is_file():
+                score += 8.0
+
             # Tables with many numeric cells are often the actual statement.
             numeric_tokens = re.findall(r"(?<![A-Za-z])\(?\d[\d,]*(?:\.\d+)?\)?", text)
             if len(numeric_tokens) >= 8:
