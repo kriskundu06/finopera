@@ -6,7 +6,7 @@ import time
 from typing import Any
 from dotenv import load_dotenv
 from google import genai
-from backend.services.vector_store import search_chunks
+from backend.services.vector_store import get_document_chunks, search_chunks
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -78,100 +78,126 @@ NUMERIC_FIELDS = {
 
 
 
+def _statement_relevance_score(text: str, statement: str) -> int:
+    """Score statement-like chunks by explicit row labels, not embedding similarity."""
+    normalized = re.sub(r"\\s+", " ", text.casefold())
+    if statement == "income_statement":
+        patterns = (
+            r"revenue from operations|total revenue|revenue",
+            r"profit for the period|profit after tax|net profit|net income",
+            r"operating profit|operating income|profit before tax",
+            r"quarter ended|three months ended|30 september",
+        )
+    elif statement == "balance_sheet":
+        patterns = (
+            r"total current assets|current assets",
+            r"total current liabilities|current liabilities",
+            r"total assets",
+            r"total equity|equity attributable|total shareholders",
+            r"borrowings|lease liabilities|debt",
+            r"as at|30 september|30 september 2026",
+        )
+    else:
+        patterns = (
+            r"inr|rupees|₹|rs\\.",
+            r"crore|crores|lakh|lakhs|million|thousand",
+            r"quarter ended|30 september|2026",
+        )
+    return sum(bool(re.search(pattern, normalized)) for pattern in patterns)
+
+
 def _retrieve_statement_passages(
     document_id: str,
     filename: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Retrieve statement passages belonging to one exact uploaded document.
+    """Retrieve statement chunks deterministically within one uploaded PDF.
 
-    filename is retained for caller compatibility/display; document_id is the
-    authoritative filter so same-named PDFs cannot be mixed.
+    First enumerate the document's own chunks and rank explicit statement-row
+    labels. Semantic retrieval is retained as a fallback when enumeration is
+    unavailable, but can no longer silently be the only route for dense tables.
     """
+    try:
+        document_chunks = [
+            chunk for chunk in get_document_chunks(document_id)
+            if chunk.get("document_id") == document_id
+            and str(chunk.get("text", "")).strip()
+        ]
+    except Exception:
+        logger.exception(
+            "Document chunk enumeration failed for %s; using semantic fallback",
+            document_id[:12],
+        )
+        document_chunks = []
+
     grouped: dict[str, list[dict[str, Any]]] = {}
+    limits = {
+        "income_statement": 10,
+        "balance_sheet": MAX_BALANCE_SHEET_PASSAGES,
+        "reporting_details": 10,
+    }
+
+    if document_chunks:
+        for statement in STATEMENT_FIELDS:
+            ranked = []
+            for chunk in document_chunks:
+                score = _statement_relevance_score(
+                    str(chunk.get("text", "")), statement
+                )
+                if score:
+                    ranked.append((score, chunk))
+            ranked.sort(
+                key=lambda pair: (
+                    -pair[0],
+                    pair[1].get("page") if isinstance(pair[1].get("page"), int) else 0,
+                    pair[1].get("chunk_number") if isinstance(pair[1].get("chunk_number"), int) else 0,
+                )
+            )
+            grouped[statement] = [
+                chunk for _, chunk in ranked[:limits[statement]]
+            ]
+            logger.info(
+                "Selected %s deterministic %s passages from %s document chunks",
+                len(grouped[statement]), statement, len(document_chunks),
+            )
+        return grouped
+
+    # Compatibility fallback for older stores or unavailable enumeration.
     successful_queries = 0
     retrieval_errors: list[Exception] = []
-
     for statement, queries in STATEMENT_QUERIES.items():
         passages: list[dict[str, Any]] = []
         seen = set()
-        limit = (
-            MAX_BALANCE_SHEET_PASSAGES
-            if statement == "balance_sheet"
-            else 10
-        )
-
         for query in queries:
-            if len(passages) >= limit:
+            if len(passages) >= limits[statement]:
                 break
-
             try:
                 results = search_chunks(
-                    query=query,
-                    top_k=MAX_RESULTS_PER_QUERY,
+                    query=query, top_k=MAX_RESULTS_PER_QUERY,
                     document_id=document_id,
                 )
             except Exception as exc:
                 retrieval_errors.append(exc)
-                logger.exception(
-                    "Passage retrieval failed for statement %s",
-                    statement,
-                )
+                logger.exception("Passage retrieval failed for %s", statement)
                 continue
-
             successful_queries += 1
-            added_for_query = 0
             for chunk in results:
-                # Defensive isolation check in addition to the vector-store filter.
                 if chunk.get("document_id") != document_id:
                     continue
-
                 text = str(chunk.get("text", "")).strip()
-                if not text:
+                key = (chunk.get("document_id"), chunk.get("page"), text)
+                if not text or key in seen:
                     continue
-
-                key = (
-                    chunk.get("document_id"),
-                    chunk.get("page"),
-                    text,
-                )
-                if key in seen:
-                    continue
-
                 seen.add(key)
                 passages.append(chunk)
-                added_for_query += 1
-
-                if (
-                    len(passages) >= limit
-                    or added_for_query >= MAX_PASSAGES_PER_QUERY
-                ):
+                if len(passages) >= limits[statement]:
                     break
-
         grouped[statement] = passages
-        logger.info(
-            "Retrieved %s passages for %s from document %s",
-            len(passages),
-            statement,
-            document_id[:12],
-        )
 
-    # An empty result is meaningful only when the vector store answered the
-    # retrieval requests. If every query failed, do not misreport an outage
-    # as a document with no financial evidence.
     if successful_queries == 0 and retrieval_errors:
         raise RuntimeError(
             "Document passage retrieval failed. Check the vector database "
             "and embedding service, then retry."
         ) from retrieval_errors[-1]
-
-    if retrieval_errors:
-        logger.warning(
-            "Document extraction continued with partial retrieval: "
-            "%s of %s retrieval queries failed",
-            len(retrieval_errors),
-            successful_queries + len(retrieval_errors),
-        )
-
     return grouped
 
 
