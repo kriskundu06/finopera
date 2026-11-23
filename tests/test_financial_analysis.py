@@ -242,3 +242,46 @@ def test_gemini_does_not_fallback_on_non_transient_error(monkeypatch):
         raise AssertionError("Expected non-transient Gemini failure")
 
     assert calls == ["primary-model"]
+
+
+def test_statement_row_fallback_uses_latest_first_column_and_page_evidence():
+    from backend.services.financial_extraction import _apply_income_statement_fallback
+
+    passage = {
+        "text": (
+            "(INR crore) Quarter ended September 30, 2026 June 30, 2026 "
+            "September 30, 2025 Revenue from operations 24,138 20,211 13,590 "
+        ),
+        "source": "Eternal_Q2FY27.pdf",
+        "page": 21,
+    }
+    financials = {"revenue": None, "net_income": None, "operating_income": None}
+    evidence = {"revenue": None, "net_income": None, "operating_income": None}
+
+    _apply_income_statement_fallback([passage], financials, evidence)
+
+    assert financials["revenue"] == 24138
+    assert evidence["revenue"]["page"] == 21
+    assert evidence["revenue"]["type"] == "deterministic_row_match"
+    assert financials["operating_income"] is None
+
+
+def test_statement_row_fallback_does_not_invent_unreported_operating_income():
+    from backend.services.financial_extraction import _apply_income_statement_fallback
+
+    passage = {
+        "text": (
+            "Revenue from operations 24,138 20,211 13,590 "
+            "Profit for the period / year attributable to: "
+            "Owners of the Parent 125 92 65"
+        ),
+        "source": "Eternal_Q2FY27.pdf",
+        "page": 21,
+    }
+    financials = {"revenue": None, "net_income": None, "operating_income": None}
+    evidence = {"revenue": None, "net_income": None, "operating_income": None}
+
+    _apply_income_statement_fallback([passage], financials, evidence)
+
+    assert financials["revenue"] == 24138
+    assert financials["operating_income"] is None
