@@ -872,20 +872,20 @@ def _apply_income_statement_fallback(
 ) -> None:
     """Recover directly reported income-statement rows without an LLM."""
     rows = {
-        "revenue": r"\\bRevenue from operations\\b",
-        "net_income": r"\\bProfit for the period\\s*/\\s*year\\s*\\(VIII\\s*-\\s*IX\\)",
+        "revenue": r"\bRevenue from operations\b",
+        "net_income": r"\bProfit for the period\s*/\s*year\s*\(VIII\s*-\s*IX\)",
         # Do not map profit-before-tax or cash-flow operating profit to
         # operating_income: they are different accounting measures.
-        "operating_income": r"\\bOperating (?:income|profit)\\b",
+        "operating_income": r"\bOperating (?:income|profit)\b",
     }
     stops = [
-        r"\\bOther income\\b",
-        r"\\bTotal income\\b",
-        r"\\bExpenses\\b",
-        r"\\bProfit before exceptional items and tax\\b",
-        r"\\bProfit before tax\\b",
-        r"\\bTax expense\\b",
-        r"\\bOther comprehensive income\\b",
+        r"\bOther income\b",
+        r"\bTotal income\b",
+        r"\bExpenses\b",
+        r"\bProfit before exceptional items and tax\b",
+        r"\bProfit before tax\b",
+        r"\bTax expense\b",
+        r"\bOther comprehensive income\b",
     ]
     _apply_statement_row_fallback(passages, financials, evidence, rows, stops)
 
@@ -898,22 +898,22 @@ def _apply_balance_sheet_fallback(
 ) -> None:
     """Recover directly reported Indian/US balance-sheet rows from source text."""
     rows = {
-        "current_assets": r"\\bTotal current assets\\b",
-        "current_liabilities": r"\\bTotal current liabilities\\b",
-        "total_equity": r"\\bTotal equity\\b|\\bTotal stockholders[’']?\\s+equity\\b",
-        "total_assets": r"\\bTotal assets\\b",
+        "current_assets": r"\bTotal current assets\b",
+        "current_liabilities": r"\bTotal current liabilities\b",
+        "total_equity": r"\bTotal equity\b|\bTotal stockholders[’']?\s+equity\b",
+        "total_assets": r"\bTotal assets\b",
     }
     stops = [
-        r"\\bTotal current assets\\b",
-        r"\\bTotal current liabilities\\b",
-        r"\\bTotal assets\\b",
-        r"\\bEquity and liabilities\\b",
-        r"\\bTotal equity\\b",
-        r"\\bLiabilities\\b",
-        r"\\bTotal liabilities\\b",
-        r"\\bTotal stockholders[’']?\\s+equity\\b",
-        r"\\bTotal liabilities and stockholders[’']?\\s+equity\\b",
-        r"\\bSee accompanying notes\\b",
+        r"\bTotal current assets\b",
+        r"\bTotal current liabilities\b",
+        r"\bTotal assets\b",
+        r"\bEquity and liabilities\b",
+        r"\bTotal equity\b",
+        r"\bLiabilities\b",
+        r"\bTotal liabilities\b",
+        r"\bTotal stockholders[’']?\s+equity\b",
+        r"\bTotal liabilities and stockholders[’']?\s+equity\b",
+        r"\bSee accompanying notes\b",
     ]
     _apply_statement_row_fallback(
         passages, financials, evidence, rows, stops
