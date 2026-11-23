@@ -1021,11 +1021,11 @@ def _apply_balance_sheet_fallback(
 
         if financials.get("units") in (None, "unspecified"):
             unit_patterns = [
-                (r"\\bin\\s+thousands?\\b|\\b000s\\b", "thousands"),
-                (r"\\bin\\s+millions?\\b", "millions"),
-                (r"\\bin\\s+billions?\\b", "billions"),
-                (r"\\bin\\s+crores?\\b|₹\\s*(?:in\\s*)?crores?", "crores"),
-                (r"\\bin\\s+lakhs?\\b|₹\\s*(?:in\\s*)?lakhs?", "lakhs"),
+                (r"\bin\s+thousands?\b|\b000s\b", "thousands"),
+                (r"\bin\s+millions?\b", "millions"),
+                (r"\bin\s+billions?\b", "billions"),
+                (r"\bin\s+crores?\b|₹\s*(?:in\s*)?crores?", "crores"),
+                (r"\bin\s+lakhs?\b|₹\s*(?:in\s*)?lakhs?", "lakhs"),
             ]
             for pattern, unit_name in unit_patterns:
                 match = re.search(pattern, text, re.IGNORECASE)
@@ -1041,10 +1041,10 @@ def _apply_balance_sheet_fallback(
 
         if financials.get("currency") in (None, "unspecified"):
             currency_patterns = [
-                (r"\\bINR\\b|₹|\\bRs\\.?\\b", "INR"),
-                (r"US\\$|\\bUSD\\b|\\$", "USD"),
-                (r"€|\\bEUR\\b", "EUR"),
-                (r"£|\\bGBP\\b", "GBP"),
+                (r"\bINR\b|₹|\bRs\.?\b", "INR"),
+                (r"US\$|\bUSD\b|\$", "USD"),
+                (r"€|\bEUR\b", "EUR"),
+                (r"£|\bGBP\b", "GBP"),
             ]
             for pattern, currency_code in currency_patterns:
                 match = re.search(pattern, text, re.IGNORECASE)
