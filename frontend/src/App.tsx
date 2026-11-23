@@ -63,7 +63,7 @@ const navigation = [
   { label: 'Documents', page: 'Overview', icon: FileText },
   { label: 'AI Analyst', page: 'Ask AI', icon: Bot },
   { label: 'Financial Statements', page: 'Financial analysis', icon: ChartNoAxesCombined },
-  { label: 'Settings', page: 'Help & documentation', icon: Settings },
+  { label: 'Settings', page: 'Settings', icon: Settings },
 ]
 
 const metrics = [
@@ -794,7 +794,7 @@ function App() {
 
             onClick={() => {
 
-              setActivePage('Help & documentation')
+              setActivePage('Settings')
 
               setMobileMenuOpen(false)
 
@@ -802,7 +802,7 @@ function App() {
 
             className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition ${
 
-              activePage === 'Help & documentation'
+              activePage === 'Settings'
 
                 ? 'bg-lime-500/15 font-medium text-lime-300'
 
@@ -814,7 +814,7 @@ function App() {
 
             <CircleHelp size={18} />
 
-            Help & documentation
+            Settings
 
           </button>
 
@@ -876,7 +876,7 @@ function App() {
 
         <main className="mx-auto max-w-[1600px] space-y-7 px-5 py-7 sm:px-8 sm:py-9">
 
-          {activePage === 'Help & documentation' ? (
+          {activePage === 'Settings' ? (
 
             <section className="mx-auto w-full max-w-5xl space-y-7">
 
@@ -890,7 +890,7 @@ function App() {
 
                 </div>
 
-                <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Help & documentation</h2>
+                <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Settings</h2>
 
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
 
