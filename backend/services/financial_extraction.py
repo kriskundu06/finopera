@@ -70,6 +70,8 @@ STATEMENT_FIELDS = {
 
         "current_liabilities",
 
+        "total_liabilities",
+
         "long_term_debt",
 
         "total_debt",
@@ -117,6 +119,8 @@ NUMERIC_FIELDS = {
     "current_assets",
 
     "current_liabilities",
+
+    "total_liabilities",
 
     "long_term_debt",
 
@@ -415,6 +419,10 @@ For the balance sheet:
 
 - current_assets and current_liabilities mean the reported totals, not a
   subtotal inferred from selected component rows.
+
+- total_liabilities means the explicit total liabilities row. Do not use
+  "Total liabilities and equity" or "Total liabilities and shareholders'
+  equity" as total liabilities.
 
 - long_term_debt means the reported non-current borrowings / long-term debt.
 
@@ -919,6 +927,8 @@ def _apply_balance_sheet_fallback(
 
         "current_liabilities": r"\bTotal current liabilities\b",
 
+        "total_liabilities": r"\bTotal liabilities\b(?!\s+and\s+(?:stockholders|shareholders|equity))",
+
         "long_term_debt": r"\bLong[-\s]term debt\b",
 
         "total_equity": r"\bTotal stockholders[’']?\s+equity\b",
@@ -934,6 +944,8 @@ def _apply_balance_sheet_fallback(
         r"\bTotal current assets\b",
 
         r"\bTotal current liabilities\b",
+
+        r"\bTotal liabilities\b",
 
         r"\bLong[-\s]term debt\b",
 
