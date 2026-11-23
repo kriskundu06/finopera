@@ -302,6 +302,8 @@ def analyze_financial_document(
         "financials": financials,
         "analysis": analysis,
         "evidence": extraction.get("evidence", {}),
+        "field_status": extraction.get("field_status", {}),
+        "verified_fields": extraction.get("verified_fields", []),
         "sources": extraction.get("sources", []),
         "currency": extraction.get(
             "currency",
