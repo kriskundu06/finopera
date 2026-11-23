@@ -621,7 +621,7 @@ function App() {
 
                   }}
 
-                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[13px] transition ${
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[13px] transition ${sidebarCollapsed ? 'justify-center px-2' : ''} ${
 
                     active
 
@@ -633,13 +633,13 @@ function App() {
 
                 >
 
-                  <Icon size={18} strokeWidth={1.8} />
+                  <Icon className="shrink-0" size={18} strokeWidth={1.8} />
 
-                  {!sidebarCollapsed && <span>{label}</span>}
+                  {!sidebarCollapsed && <span className="min-w-0 truncate">{label}</span>}
 
-                  {label === 'AI Analyst' && (
+                  {label === 'AI Analyst' && !sidebarCollapsed && (
 
-                    <span className="ml-auto rounded-md bg-lime-500/20 px-2 py-0.5 text-[10px] text-lime-300">
+                    <span className="ml-auto shrink-0 rounded-md bg-lime-500/20 px-2 py-0.5 text-[10px] text-lime-300">
 
                       AI
 
@@ -681,19 +681,19 @@ function App() {
 
           >
 
-            <CircleHelp size={18} />
+            <CircleHelp className="shrink-0" size={18} />
 
-            Settings
+            {!sidebarCollapsed && <span className="min-w-0 truncate">Settings</span>}
 
           </button>
 
-          <div className="mt-2 border-t border-white/[0.07] pt-4">
+          {!sidebarCollapsed && <div className="mt-2 border-t border-white/[0.07] pt-4">
 
             <p className="text-xs text-slate-600">FinOpera</p>
 
-            <p className="mt-1 text-[10px] text-slate-700">RAG-Powered Due Diligence Platform · v1.0</p>
+            <p className="mt-1 text-[10px] leading-4 text-slate-700">RAG-Powered Due Diligence Platform · v1.0</p>
 
-          </div>
+          </div>}
 
         </div>
 
