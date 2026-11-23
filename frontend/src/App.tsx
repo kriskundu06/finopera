@@ -491,6 +491,7 @@ function App() {
           question,
           document_id: documentInfo.document_id,
           top_k: 5,
+          conversation_history: chatMessages.slice(-8).map((message) => ({ role: message.role, content: message.content })),
         }),
 
       })
