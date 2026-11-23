@@ -16,26 +16,30 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 MAX_CHARS_PER_PASSAGE = 6000
 
-MAX_PASSAGES_PER_STATEMENT = 10
+MAX_PASSAGES_PER_STATEMENT = 15
 
-MAX_BALANCE_SHEET_PASSAGES = 18
+MAX_BALANCE_SHEET_PASSAGES = 24
 
-MAX_RESULTS_PER_QUERY = 8
+MAX_RESULTS_PER_QUERY = 12
 
-MAX_PASSAGES_PER_QUERY = 3
+MAX_PASSAGES_PER_QUERY = 4
 
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 STATEMENT_QUERIES = {
     "income_statement": [
-        "income statement revenue sales operating income net income",
-        "statement of operations total revenue operating profit profit after tax",
-        "quarterly revenue from operations operating profit net profit",
+        "income statement revenue net sales net income net earnings profit after tax",
+        "consolidated statements of operations revenue operating income income before taxes net income",
+        "net income attributable to shareholders profit for the year profit after tax",
+        "cost of revenue cost of sales gross profit",
+        "revenue from operations operating profit profit after tax for the reporting period",
     ],
     "balance_sheet": [
         "consolidated balance sheet total assets total liabilities total equity",
-        "total current assets total current liabilities total debt borrowings",
-        "total stockholders equity shareholders equity",
+        "total current assets total current liabilities current assets current liabilities",
+        "total debt borrowings short term debt current portion long term debt",
+        "total stockholders equity shareholders equity shareholders funds",
+        "consolidated balance sheets assets liabilities equity current period",
     ],
     "reporting_details": [
         "financial statements reporting currency units in thousands millions",
@@ -97,7 +101,7 @@ def _retrieve_statement_passages(
         limit = (
             MAX_BALANCE_SHEET_PASSAGES
             if statement == "balance_sheet"
-            else 10
+            else MAX_PASSAGES_PER_STATEMENT
         )
 
         for query in queries:
@@ -209,7 +213,7 @@ def _build_context(
 
             if statement == "balance_sheet"
 
-            else 1800
+            else 3000
 
         )
 
@@ -308,8 +312,6 @@ For the balance sheet:
   identified as total debt.
 
 - Do not treat total liabilities as total debt.
-
-- Use the March 31, 2026 column when the column ordering is clear.
 
 - Look carefully at the entire balance-sheet excerpt, including its
 
