@@ -80,9 +80,10 @@ NUMERIC_FIELDS = {
 
 def _statement_relevance_score(text: str, statement: str) -> int:
     """Score statement-like chunks by explicit row labels, not embedding similarity."""
-    normalized = re.sub(r"\\s+", " ", text.casefold())
+    normalized = re.sub(r"\s+", " ", text.casefold())
     if statement == "income_statement":
         patterns = (
+            r"consolidated statement of profit and loss|statement of profit and loss|income statement",
             r"revenue from operations|total revenue|revenue",
             r"profit for the period|profit after tax|net profit|net income",
             r"operating profit|operating income|profit before tax",
