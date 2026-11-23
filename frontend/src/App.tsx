@@ -11,11 +11,9 @@ import {
 
   Info,
 
-  Wallet,
 
   Landmark,
 
-  TrendingUp,
 
   ArrowDownRight,
 
@@ -50,7 +48,6 @@ import {
 
   ShieldAlert,
 
-  ShieldCheck,
 
   Upload,
 
