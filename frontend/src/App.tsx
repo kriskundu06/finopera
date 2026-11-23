@@ -843,7 +843,7 @@ function App() {
                 <button onClick={async()=>{try{const response=await fetch(`${API_BASE_URL}/financial-analysis/compare/report`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reports:comparisonReports,currency:comparisonResult.currency,units:comparisonResult.units,changes:comparisonResult.changes})});if(!response.ok){const payload=await response.json().catch(()=>({}));throw new Error(payload.detail||'PDF export failed.');}const blob=await response.blob();const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='finopera-comparison.pdf';document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);}catch(error){setComparisonError(error instanceof Error?error.message:'PDF export failed.');}}} className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 hover:bg-white/[0.04]"><Download size={16}/>Export comparison PDF</button>
               </div>}
             </section>
-          ) : {activePage === 'Settings' ? (
+          ) : activePage === 'Settings' ? (
 
             <section className="mx-auto w-full max-w-5xl space-y-7">
 
