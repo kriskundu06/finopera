@@ -1,6 +1,7 @@
 
 
 import { useRef, useState } from 'react'
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 
 import {
 
@@ -57,14 +58,11 @@ import {
 } from 'lucide-react'
 
 const navigation = [
-
-  { label: 'Overview', icon: LayoutDashboard },
-
-  { label: 'Financial analysis', icon: ChartNoAxesCombined },
-
-
-  { label: 'Ask AI', icon: FileSearch },
-
+  { label: 'Dashboard', page: 'Overview', icon: LayoutDashboard },
+  { label: 'Documents', page: 'Overview', icon: FileText },
+  { label: 'AI Analyst', page: 'Ask AI', icon: Bot },
+  { label: 'Financial Statements', page: 'Financial analysis', icon: ChartNoAxesCombined },
+  { label: 'Settings', page: 'Help & documentation', icon: Settings },
 ]
 
 const metrics = [
@@ -263,6 +261,8 @@ function App() {
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
   const [isAnalyzing, setIsAnalyzing] = useState(false)
 
   const [uploadError, setUploadError] = useState('')
@@ -358,7 +358,7 @@ function App() {
 
       setUploadMessage('PDF indexed. Extracting financial figures and calculating ratios…')
 
-      const analysisResponse = await fetch(`${API_BASE_URL}/financial-analyze-document?filename=${encodeURIComponent(uploadPayload.filename || selectedFile.name)}`,{ method: 'POST' })
+      const analysisResponse = await fetch(`${API_BASE_URL}/financial-analyze-document?document_id=${encodeURIComponent(uploadPayload.document_id)}&filename=${encodeURIComponent(uploadPayload.filename || selectedFile.name)}`,{ method: 'POST' })
 
       const analysisPayload = await analysisResponse.json().catch(() => ({}))
 
@@ -483,13 +483,13 @@ function App() {
 
   const metricCards = [
 
-    { ...metrics[0], value: financialResult ? formatAmount(financials.revenue, currency, units) : metrics[0].value, change: financialResult ? 'From report' : metrics[0].change, note: financialResult ? 'Reported revenue' : metrics[0].note },
+    { ...metrics[0], value: financialResult ? formatAmount(financials.revenue, currency, units) : '—', change: financialResult ? 'From report' : 'Awaiting report', note: financialResult ? 'Reported revenue' : 'Upload a report to populate' },
 
-    { ...metrics[1], value: financialResult ? formatPercent(analysis.net_profit_margin) : metrics[1].value, change: financialResult ? 'Calculated' : metrics[1].change, note: financialResult ? 'Net income / revenue' : metrics[1].note },
+    { ...metrics[1], value: financialResult ? formatPercent(analysis.net_profit_margin) : '—', change: financialResult ? 'Calculated' : 'Awaiting report', note: financialResult ? 'Net income / revenue' : 'Upload a report to populate' },
 
-    { ...metrics[2], value: financialResult ? formatRatio(analysis.current_ratio) : metrics[2].value, change: financialResult ? 'Calculated' : metrics[2].change, note: financialResult ? 'Current assets / liabilities' : metrics[2].note },
+    { ...metrics[2], value: financialResult ? formatRatio(analysis.current_ratio) : '—', change: financialResult ? 'Calculated' : 'Awaiting report', note: financialResult ? 'Current assets / liabilities' : 'Upload a report to populate' },
 
-    { ...metrics[3], value: financialResult ? formatAmount(financials.total_debt, currency, units) : metrics[3].value, change: financialResult ? `D/E ${formatRatio(analysis.debt_to_equity)}` : metrics[3].change, note: financialResult ? 'Reported total debt' : metrics[3].note },
+    { ...metrics[3], value: financialResult ? formatAmount(financials.total_debt, currency, units) : '—', change: financialResult ? `D/E ${formatRatio(analysis.debt_to_equity)}` : 'Awaiting report', note: financialResult ? 'Reported total debt' : 'Upload a report to populate' },
 
   ]
 
@@ -683,7 +683,7 @@ function App() {
 
       <aside
 
-        className={`fixed inset-y-0 left-0 z-40 flex w-[252px] flex-col border-r border-white/[0.07] bg-[#0d1220] transition-transform duration-200 ${
+        className={`fixed inset-y-0 left-0 z-40 flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[252px]'} flex-col border-r border-white/[0.07] bg-[#0d1220] transition-transform duration-200 ${
 
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
 
@@ -691,7 +691,7 @@ function App() {
 
       >
 
-        <div className="flex h-[76px] items-center gap-3 border-b border-white/[0.07] px-6">
+        <div className={`flex h-[76px] items-center gap-3 border-b border-white/[0.07] ${sidebarCollapsed ? 'justify-center px-2' : 'px-6'}`}>
 
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-500/15 text-lime-400">
 
@@ -699,13 +699,13 @@ function App() {
 
           </div>
 
-          <div>
+          {!sidebarCollapsed && <div>
 
             <p className="text-[15px] font-semibold tracking-tight text-white">FinOpera</p>
 
             <p className="mt-0.5 text-xs text-slate-500">RAG-Powered Due Diligence</p>
 
-          </div>
+          </div>}
 
           <button
 
@@ -725,17 +725,17 @@ function App() {
 
         <div className="px-4 pt-7">
 
-          <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.19em] text-slate-600">
+          {!sidebarCollapsed && <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.19em] text-slate-600">
 
             Workspace
 
-          </p>
+          </p>}
 
           <nav className="space-y-1">
 
-            {navigation.map(({ label, icon: Icon }) => {
+            {navigation.map(({ label, page: pageKey, icon: Icon }) => {
 
-              const active = activePage === label
+              const active = activePage === pageKey
 
               return (
 
@@ -745,7 +745,7 @@ function App() {
 
                   onClick={() => {
 
-                    setActivePage(label)
+                    setActivePage(pageKey)
 
                     setMobileMenuOpen(false)
 
@@ -765,9 +765,9 @@ function App() {
 
                   <Icon size={18} strokeWidth={1.8} />
 
-                  <span>{label}</span>
+                  {!sidebarCollapsed && <span>{label}</span>}
 
-                  {label === 'Ask AI' && (
+                  {label === 'AI Analyst' && (
 
                     <span className="ml-auto rounded-md bg-lime-500/20 px-2 py-0.5 text-[10px] text-lime-300">
 
@@ -837,9 +837,9 @@ function App() {
 
             <button
 
-              className="rounded-lg p-2 text-slate-400 hover:bg-white/5 lg:hidden"
+              className="rounded-lg p-2 text-slate-400 hover:bg-white/5"
 
-              onClick={() => setMobileMenuOpen(true)}
+              onClick={() => { if (window.innerWidth < 1024) setMobileMenuOpen(true); else setSidebarCollapsed(value => !value) }}
 
               aria-label="Open menu"
 
@@ -1575,13 +1575,13 @@ function App() {
 
                   <h3 className="text-sm font-semibold text-white">
 
-                    Risk overview
+                    Financial health snapshot
 
                   </h3>
 
                   <p className="mt-1.5 text-xs text-slate-500">
 
-                    Indicators to evaluate
+                    Report-backed ratio indicators
 
                   </p>
 
@@ -1613,7 +1613,7 @@ function App() {
 
                       <p className="mt-1 text-[11px] text-slate-500">
 
-                        Current ratio: {financialResult ? formatRatio(analysis.current_ratio) : '1.92×'}
+                        Current ratio: {formatRatio(analysis.current_ratio)}
 
                       </p>
 
@@ -1645,7 +1645,7 @@ function App() {
 
                       <p className="mt-1 text-[11px] text-slate-500">
 
-                        OCF / net income: {financialResult ? formatRatio(analysis.operating_cash_flow_to_net_income) : '0.73×'}
+                        OCF / net income: {formatRatio(analysis.operating_cash_flow_to_net_income)}
 
                       </p>
 
@@ -1677,7 +1677,7 @@ function App() {
 
                       <p className="mt-1 text-[11px] text-slate-500">
 
-                        Debt-to-equity: {financialResult ? formatRatio(analysis.debt_to_equity) : '0.17×'}
+                        Debt-to-equity: {formatRatio(analysis.debt_to_equity)}
 
                       </p>
 
@@ -1701,6 +1701,24 @@ function App() {
 
             </article>
 
+          </section>
+
+
+          <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+            <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
+              <h3 className="text-sm font-semibold text-white">Balance sheet composition</h3>
+              <p className="mt-1 text-xs text-slate-500">Equity and liabilities calculated from verified statement values</p>
+              {typeof financials.total_assets === 'number' && financials.total_assets > 0 && typeof financials.total_equity === 'number' && financials.total_equity >= 0 && financials.total_equity <= financials.total_assets ? (
+                <div className="grid grid-cols-1 items-center gap-3 sm:grid-cols-2">
+                  <div className="h-[210px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={[{name:'Equity',value:financials.total_equity},{name:'Liabilities',value:financials.total_assets-financials.total_equity}]} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={4}>{[0,1].map(i=><Cell key={i} fill={['#a3e635','#38bdf8'][i]}/>)}</Pie><Tooltip formatter={(v)=>formatAmount(Number(v),currency,units)}/></PieChart></ResponsiveContainer></div>
+                  <div className="space-y-3 text-xs text-slate-400"><p>🟢 Equity <strong className="float-right text-white">{formatAmount(financials.total_equity,currency,units)}</strong></p><p>🔵 Liabilities <strong className="float-right text-white">{formatAmount(financials.total_assets-financials.total_equity,currency,units)}</strong></p></div>
+                </div>
+              ) : <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-xs text-slate-500">Verified total assets and equity are required to render this chart.</div>}
+            </article>
+            <article className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
+              <h3 className="text-sm font-semibold text-white">Performance trend</h3><p className="mt-1 text-xs text-slate-500">Historical revenue and earnings</p>
+              <div className="mt-5 flex min-h-[210px] flex-col items-center justify-center rounded-xl border border-dashed border-white/10 px-6 text-center"><Activity size={24} className="text-sky-300"/><p className="mt-3 text-sm text-slate-300">Historical series unavailable</p><p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">A trend line requires multiple comparable reporting periods. This upload is treated as one period; no sample data is fabricated.</p></div>
+            </article>
           </section>
 
           <section className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
