@@ -219,7 +219,7 @@ async def extract_pdf(file: UploadFile = File(...)):
                         "The image contains the original page with possible "
                         "financial statement tables, labels, periods and amounts.]"
                     )
-                    page_text = f"{page_text}\\n{image_note}".strip()
+                    page_text = f"{page_text}\n{image_note}".strip()
 
                 pages.append({
                     "page": page_number,
