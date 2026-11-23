@@ -117,3 +117,26 @@ def test_financial_ratios_are_scale_invariant_for_indian_units():
     assert crore_result["metrics"] == lakh_result["metrics"]
     assert crore_result["units"] == "crores"
     assert lakh_result["units"] == "lakhs"
+
+
+def test_extraction_status_is_partial_when_core_fields_are_missing():
+    from backend.services.financial_extraction import NUMERIC_FIELDS, _build_extraction_status
+
+    financials = {"revenue": 24138, "net_income": 125, "total_equity": 31268}
+    evidence = {field: {"type": "source_quote"} for field in financials}
+    status = _build_extraction_status(financials, evidence, {})
+
+    assert status["extraction_status"] == "partial"
+    assert status["verified_fields"] == ["net_income", "revenue", "total_equity"]
+    assert set(status["missing_fields"]) == NUMERIC_FIELDS - set(financials)
+
+
+def test_extraction_status_is_completed_only_when_all_core_fields_are_verified():
+    from backend.services.financial_extraction import NUMERIC_FIELDS, _build_extraction_status
+
+    financials = {field: 1 for field in NUMERIC_FIELDS}
+    evidence = {field: {"type": "source_quote"} for field in NUMERIC_FIELDS}
+    status = _build_extraction_status(financials, evidence, {})
+
+    assert status["extraction_status"] == "completed"
+    assert status["missing_fields"] == []
