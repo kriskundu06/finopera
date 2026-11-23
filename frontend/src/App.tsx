@@ -358,7 +358,9 @@ function App() {
 
       setUploadMessage('PDF indexed. Extracting financial figures and calculating ratios…')
 
-      const analysisResponse = await fetch(`${API_BASE_URL}/financial-analyze-document?filename=${encodeURIComponent(uploadPayload.filename || selectedFile.name)}`,{ method: 'POST' })
+      const analysisParams = new URLSearchParams({ document_id: uploadPayload.document_id, filename: uploadPayload.filename || selectedFile.name })
+
+      const analysisResponse = await fetch(`${API_BASE_URL}/financial-analyze-document?${analysisParams.toString()}`, { method: 'POST' })
 
       const analysisPayload = await analysisResponse.json().catch(() => ({}))
 
