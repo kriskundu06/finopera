@@ -148,7 +148,11 @@ async def extract_pdf(file: UploadFile = File(...)):
                 # normal text extraction silently misses those figures, so OCR
                 # image-heavy pages when their native text layer is sparse.
                 has_images = bool(page.get_images(full=True))
-                needs_ocr = has_images and len(page_text) < 1500
+                # OCR truly scanned pages with no text layer, and also
+                # image-heavy pages where a partial text layer may omit tables.
+                needs_ocr = len(page_text) < 250 or (
+                    has_images and len(page_text) < 2500
+                )
 
                 if needs_ocr:
                     try:
@@ -166,13 +170,18 @@ async def extract_pdf(file: UploadFile = File(...)):
                         # as text recognised from embedded page images. Prefer
                         # it whenever it returns usable content, even if its
                         # character count is shorter than the native layer.
-                        if len(ocr_text) >= 80:
+                        if len(ocr_text) >= 40:
                             page_text = ocr_text
                             ocr_pages.append(page_number)
                         else:
+                            # Keep native text if OCR was inconclusive; record
+                            # the page so the upload diagnostics expose the gap.
                             ocr_skipped_pages.append({
                                 "page": page_number,
-                                "reason": "OCR returned too little usable text",
+                                "reason": (
+                                    "OCR returned too little usable text "
+                                    f"({len(ocr_text)} characters)"
+                                ),
                             })
                     except Exception as ocr_exc:
                         raise RuntimeError(
