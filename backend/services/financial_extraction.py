@@ -20,9 +20,9 @@ MAX_PASSAGES_PER_STATEMENT = 4
 
 MAX_BALANCE_SHEET_PASSAGES = 18
 
-MAX_RESULTS_PER_QUERY = 5
+MAX_RESULTS_PER_QUERY = 8
 
-MAX_PASSAGES_PER_QUERY = 2
+MAX_PASSAGES_PER_QUERY = 3
 
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
@@ -41,6 +41,8 @@ STATEMENT_QUERIES = {
     "cash_flow": [
         "statement of cash flows net cash provided by operating activities",
         "capital expenditures purchases of property plant and equipment",
+        "cash generated from operations net cash from operating activities",
+        "purchase of property plant equipment capital work in progress cash flow",
     ],
     "reporting_details": [
         "financial statements reporting currency units in thousands millions",
@@ -156,7 +158,7 @@ def _retrieve_statement_passages(
         limit = (
             MAX_BALANCE_SHEET_PASSAGES
             if statement == "balance_sheet"
-            else MAX_PASSAGES_PER_STATEMENT
+            else 10
         )
 
         for query in queries:
