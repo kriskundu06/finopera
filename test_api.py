@@ -132,3 +132,74 @@ def test_ask_returns_safe_error_when_provider_is_unavailable(monkeypatch):
     assert response.json()["detail"] == (
         "AI Analyst could not complete the request. Please try again."
     )
+
+
+def test_due_diligence_report_endpoint_generates_cited_pdf(monkeypatch):
+    def fake_report(**kwargs):
+        assert kwargs["document_id"] == "d" * 64
+        return {
+            "report": (
+                "1. Executive summary\\n"
+                "DOCUMENT FACT: Revenue was reported in the filing [S1].\\n"
+                "11. Overall preliminary risk assessment\\n"
+                "Unable to assess from the supplied report."
+            ),
+            "sources": [
+                {"source_id": "S1", "source": "annual-report.pdf", "page": 4, "text": "Revenue"},
+            ],
+            "model": "test-model",
+            "reporting_period": "FY 2025",
+        }
+
+    monkeypatch.setattr(main_module, "generate_due_diligence_report", fake_report)
+    response = client.post("/due-diligence/report", json={
+        "document_id": "d" * 64,
+        "filename": "annual-report.pdf",
+        "reporting_period": "FY 2025",
+        "financials": {"revenue": 100},
+        "analysis": {"metrics": {"net_profit_margin": 10}},
+    })
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+
+
+def test_due_diligence_report_rejects_invalid_document_id():
+    response = client.post("/due-diligence/report", json={"document_id": "invalid"})
+    assert response.status_code == 422
+
+
+def test_ask_passes_bounded_conversation_history_to_rag(monkeypatch):
+    captured = {}
+
+    def fake_answer(**kwargs):
+        captured.update(kwargs)
+        return {"answer": "The cited report states this in [S1].", "sources": []}
+
+    monkeypatch.setattr(main_module, "answer_question", fake_answer)
+    response = client.post("/ask", json={
+        "question": "What does that imply?",
+        "document_id": "e" * 64,
+        "top_k": 5,
+        "conversation_history": [
+            {"role": "user", "content": "What is the debt?"},
+            {"role": "assistant", "content": "The report lists debt at 100."},
+        ],
+    })
+    assert response.status_code == 200
+    assert captured["conversation_history"] == [
+        {"role": "user", "content": "What is the debt?"},
+        {"role": "assistant", "content": "The report lists debt at 100."},
+    ]
+
+
+def test_ask_rejects_more_than_eight_history_turns():
+    response = client.post("/ask", json={
+        "question": "Follow up",
+        "document_id": "f" * 64,
+        "conversation_history": [
+            {"role": "user", "content": f"Question {index}"}
+            for index in range(9)
+        ],
+    })
+    assert response.status_code == 422

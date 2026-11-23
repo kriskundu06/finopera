@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import math
 import re
 from io import BytesIO
 from pathlib import Path
@@ -16,9 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from backend.services.chunking import chunk_pages
-from backend.services.financial_analysis import calculate_financial_metrics
+from backend.services.financial_analysis import calculate_financial_metrics, safe_divide
 from backend.services.financial_extraction import extract_financials
-from backend.services.rag import answer_question
+from backend.services.rag import answer_question, generate_due_diligence_report
 from backend.services.vector_store import index_chunks, search_chunks
 
 
@@ -43,6 +44,7 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     document_id: str = Field(min_length=1, max_length=64)
     top_k: int = Field(default=5, ge=1, le=10)
+    conversation_history: list[dict[str, str]] = Field(default_factory=list, max_length=8)
 
 
 class FinancialAnalysisRequest(BaseModel):
@@ -69,7 +71,7 @@ def validate_document_id(document_id: str) -> str:
     """Validate that document_id is a 64-character SHA-256 hex digest."""
     if not re.fullmatch(r"[a-fA-F0-9]{64}", document_id):
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail=(
                 "Invalid document_id. Expected a 64-character "
                 "SHA-256 hexadecimal hash."
@@ -83,7 +85,32 @@ def financial_analysis(request: FinancialAnalysisRequest):
     financials = request.model_dump()
 
     try:
-        return calculate_financial_metrics(financials)
+        result = calculate_financial_metrics(financials)
+        metrics = result["metrics"]
+
+        # Backward-compatible metrics exposed by this API endpoint only.
+        gross_margin = safe_divide(
+            financials.get("gross_profit"),
+            financials.get("revenue"),
+        )
+        metrics["gross_margin"] = (
+            round(gross_margin * 100, 2) if gross_margin is not None else None
+        )
+
+        operating_cash_flow = financials.get("operating_cash_flow")
+        capital_expenditure = financials.get("capital_expenditure")
+        valid_cash_flow_inputs = all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            for value in (operating_cash_flow, capital_expenditure)
+        )
+        metrics["free_cash_flow"] = (
+            round(operating_cash_flow - capital_expenditure, 2)
+            if valid_cash_flow_inputs
+            else None
+        )
+        return result
     except (TypeError, ValueError) as exc:
         logger.warning("Invalid financial-analysis input: %s", exc)
         raise HTTPException(
@@ -554,6 +581,7 @@ def ask_question_endpoint(request: AskRequest):
             question=request.question,
             document_id=document_id,
             top_k=request.top_k,
+            conversation_history=request.conversation_history,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -576,3 +604,140 @@ def ask_question_endpoint(request: AskRequest):
             status_code=502,
             detail="AI Analyst could not reach its provider. Please try again.",
         ) from exc
+
+
+@app.post("/due-diligence/report")
+def create_due_diligence_report(payload: dict = Body(...)):
+    """Generate a comprehensive, evidence-cited due-diligence PDF."""
+    document_id = validate_document_id(payload.get("document_id", ""))
+    financials = payload.get("financials") or {}
+    analysis = payload.get("analysis") or {}
+    metrics = analysis.get("metrics", {}) if isinstance(analysis, dict) else {}
+    try:
+        result = generate_due_diligence_report(
+            document_id=document_id,
+            financials=financials if isinstance(financials, dict) else {},
+            metrics=metrics if isinstance(metrics, dict) else {},
+            reporting_period=payload.get("reporting_period"),
+            filename=payload.get("filename"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.exception("Due-diligence report generation failed")
+        message = str(exc)
+        status_code = 503 if "GEMINI_API_KEY is missing" in message else 502
+        detail = (
+            "AI Due Diligence is not configured. Add GEMINI_API_KEY to the backend environment."
+            if status_code == 503
+            else "The AI due-diligence report could not be generated. Please retry."
+        )
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    from xml.sax.saxutils import escape
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import KeepTogether, PageBreak
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4, rightMargin=48, leftMargin=48,
+        topMargin=52, bottomMargin=48,
+        title="FinOpera Comprehensive Due Diligence Report",
+        author="FinOpera AI Analyst",
+    )
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(
+        name="ReportSubtitle", parent=styles["Normal"], alignment=TA_CENTER,
+        textColor=colors.HexColor("#64748B"), fontSize=9, leading=14,
+    ))
+    styles.add(ParagraphStyle(
+        name="ReportBody", parent=styles["BodyText"], fontSize=9,
+        leading=14, spaceAfter=8,
+    ))
+    styles.add(ParagraphStyle(
+        name="ReportSection", parent=styles["Heading2"], fontSize=13,
+        leading=17, textColor=colors.HexColor("#243047"),
+        spaceBefore=14, spaceAfter=7, keepWithNext=True,
+    ))
+    story = [
+        Spacer(1, 36),
+        Paragraph("FINOPERA", ParagraphStyle(
+            name="Brand", parent=styles["Title"], alignment=TA_CENTER,
+            textColor=colors.HexColor("#65A30D"), fontSize=14, leading=18,
+        )),
+        Spacer(1, 14),
+        Paragraph("Comprehensive Due Diligence Report", ParagraphStyle(
+            name="CoverTitle", parent=styles["Title"], alignment=TA_CENTER,
+            textColor=colors.HexColor("#172033"), fontSize=23, leading=29,
+        )),
+        Spacer(1, 12),
+        Paragraph(escape(str(payload.get("filename") or "Uploaded report")), styles["ReportSubtitle"]),
+        Paragraph("Reporting period: " + escape(str(payload.get("reporting_period") or "Not identified")), styles["ReportSubtitle"]),
+        Spacer(1, 12),
+        Paragraph("AI-assisted preliminary assessment · Evidence-linked · Confidential working document", styles["ReportSubtitle"]),
+        Spacer(1, 28),
+        Paragraph("Scope and important limitations", styles["Heading2"]),
+        Paragraph(
+            "This report is a preliminary, document-based diligence aid generated from the uploaded material. "
+            "It is not an audit, legal opinion, valuation, credit rating, or investment recommendation. "
+            "Statements should be checked against the original filing and independent sources before decisions are made.",
+            styles["ReportBody"],
+        ),
+        PageBreak(),
+        Paragraph("Due diligence assessment", styles["Title"]),
+        Spacer(1, 10),
+    ]
+    import re
+    for raw_line in result["report"].splitlines():
+        line = raw_line.strip()
+        if not line:
+            story.append(Spacer(1, 3))
+            continue
+        safe = escape(line)
+        safe = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", safe)
+        safe = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<i>\1</i>", safe)
+        heading = re.match(r"^(?:#{1,3}\s+)?(\d{1,2}[.)]\s+.+|#{1,3}\s+.+)$", line)
+        if heading:
+            title = re.sub(r"^#{1,3}\s+", "", line)
+            story.append(Paragraph(escape(title), styles["ReportSection"]))
+        elif line.startswith(("- ", "• ", "* ")):
+            story.append(Paragraph("• " + safe[2:], styles["ReportBody"]))
+        else:
+            story.append(Paragraph(safe, styles["ReportBody"]))
+
+    story.extend([
+        Spacer(1, 16),
+        Paragraph("Evidence index", styles["Heading2"]),
+        Paragraph("The source IDs below correspond to citations used in the report.", styles["ReportBody"]),
+    ])
+    source_rows = [["Source", "Document", "Page"]]
+    for source in result["sources"]:
+        source_rows.append([
+            source["source_id"], str(source["source"])[:70],
+            str(source["page"] if source["page"] is not None else "Not available"),
+        ])
+    source_table = Table(source_rows, colWidths=[55, 350, 65], repeatRows=1)
+    source_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#243047")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), .35, colors.HexColor("#CBD5E1")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F1F5F9")]),
+        ("FONTSIZE", (0, 0), (-1, -1), 8), ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(source_table)
+
+    def add_page_number(canvas, document):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#64748B"))
+        canvas.drawString(48, 28, "FinOpera · Preliminary due diligence · Verify against original sources")
+        canvas.drawRightString(A4[0] - 48, 28, f"Page {document.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=add_page_number, onLaterPages=add_page_number)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer, media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="finopera-due-diligence-report.pdf"'},
+    )

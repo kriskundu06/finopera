@@ -34,7 +34,6 @@ def calculate_financial_metrics(
     """Calculate financial metrics from normalized statement values."""
 
     revenue = financials.get("revenue")
-    gross_profit = financials.get("gross_profit")
     operating_income = financials.get("operating_income")
     net_income = financials.get("net_income")
 
