@@ -232,23 +232,17 @@ function formatAmount(value: unknown, currency = 'USD', units = 'millions') {
 
   const symbol = currency === 'USD' ? '$' : currency === 'INR' ? '₹' : `${currency} `
 
-  const normalizedUnits = units.toLowerCase()
-
-  let amount = value
+  const normalizedUnits = units.toLowerCase().replace(/_/g, ' ')
 
   let suffix = ''
 
-  if (normalizedUnits.includes('million')) {
+  if (normalizedUnits.includes('crore')) suffix = ' Cr'
+  else if (normalizedUnits.includes('lakh')) suffix = ' L'
+  else if (normalizedUnits.includes('billion')) suffix = ' B'
+  else if (normalizedUnits.includes('million')) suffix = ' M'
+  else if (normalizedUnits.includes('thousand')) suffix = ' K'
 
-    if (Math.abs(value) >= 1000) { amount = value / 1000; suffix = 'B' }
-
-    else suffix = 'M'
-
-  } else if (normalizedUnits.includes('billion')) suffix = 'B'
-
-  else if (normalizedUnits.includes('thousand')) suffix = 'K'
-
-  return `${symbol}${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`
+  return `${symbol}${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`
 
 }
 
@@ -331,11 +325,19 @@ function App() {
 
     }
 
+    // Selecting a different PDF starts a clean workspace. The backend keeps
+    // each document's indexed chunks by its SHA-256 document ID.
     setUploadError('')
-
     setUploadMessage('')
-
     setSelectedFile(file)
+    setDocumentInfo(null)
+    setFinancialResult(null)
+    setChatMessages([])
+    setChatInput('')
+    setChatError('')
+    setDueDiligenceError('')
+    setDueDiligenceMessage('')
+    setExportError('')
 
   }
 
@@ -349,9 +351,14 @@ function App() {
 
     setUploadMessage('Uploading and indexing PDF…')
 
+    // Clear all document-derived UI before starting another analysis.
     setFinancialResult(null)
-
     setDocumentInfo(null)
+    setChatMessages([])
+    setChatInput('')
+    setChatError('')
+    setDueDiligenceError('')
+    setDueDiligenceMessage('')
 
     try {
 
