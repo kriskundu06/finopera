@@ -409,6 +409,18 @@ def _call_gemini(
 
     statement_rules = ""
 
+    if statement == "cash_flow":
+        statement_rules = """
+For cash flow statements:
+- Interim cash flow statements may report six-month cumulative figures rather
+  than a standalone quarter. Use the latest period explicitly shown in the
+  cash-flow statement and return that exact period in reporting_period.
+- Do not relabel six-month cash flows as quarterly cash flows.
+- Preserve the sign of operating, investing and financing cash flows.
+- Closing cash and cash equivalents must come from the statement's closing
+  balance row, not from a different period's opening balance.
+"""
+
     if statement == "balance_sheet":
 
         statement_rules = """
@@ -1127,7 +1139,7 @@ def _apply_balance_sheet_fallback(
         isinstance(reported_total_debt, (int, float))
         and not isinstance(reported_total_debt, bool)
         and reported_total_debt >= 0
-        and reported_total_debt_evidence.get("type") == "source_quote"
+        and reported_total_debt_evidence.get("type") in {"source_quote", "visual_page_quote"}
     ):
         return
 
