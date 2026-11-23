@@ -28,24 +28,14 @@ client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 STATEMENT_QUERIES = {
     "income_statement": [
-        "income statement revenue sales cost of revenue gross profit operating income net income",
-        "statement of operations total revenues costs expenses net earnings",
-        "quarterly revenue from operations total income expenses profit loss before tax net profit",
-        "revenue from operations employee benefit expenses finance costs depreciation",
-        "consolidated income statement total revenue operating profit profit after tax",
+        "income statement revenue sales operating income net income",
+        "statement of operations total revenue operating profit profit after tax",
+        "quarterly revenue from operations operating profit net profit",
     ],
     "balance_sheet": [
         "consolidated balance sheet total assets total liabilities total equity",
-        "total current assets total current liabilities",
-        "long-term debt short-term debt current portion borrowings notes payable",
+        "total current assets total current liabilities total debt borrowings",
         "total stockholders equity shareholders equity",
-        "total assets total liabilities and equity",
-    ],
-    "cash_flow": [
-        "statement of cash flows net cash provided by operating activities",
-        "capital expenditures purchases of property plant and equipment",
-        "cash generated from operations net cash from operating activities",
-        "purchase of property plant equipment capital work in progress cash flow",
     ],
     "reporting_details": [
         "financial statements reporting currency units in thousands millions",
@@ -55,90 +45,36 @@ STATEMENT_QUERIES = {
 
 
 STATEMENT_FIELDS = {
-
     "income_statement": [
-
         "revenue",
-
-        "cost_of_revenue",
-
-        "gross_profit",
-
         "operating_income",
-
         "net_income",
-
     ],
-
     "balance_sheet": [
-
         "current_assets",
-
         "current_liabilities",
-
-        "long_term_debt",
-
         "total_debt",
-
         "total_equity",
-
         "total_assets",
-
     ],
-
-    "cash_flow": [
-
-        "operating_cash_flow",
-
-        "capital_expenditure",
-
-    ],
-
     "reporting_details": [
-
         "currency",
-
         "units",
-
         "reporting_period",
-
     ],
-
 }
-
 
 
 NUMERIC_FIELDS = {
-
     "revenue",
-
-    "cost_of_revenue",
-
-    "gross_profit",
-
     "operating_income",
-
     "net_income",
-
     "current_assets",
-
     "current_liabilities",
-
-    "long_term_debt",
-
     "total_debt",
-
     "total_equity",
-
     "total_assets",
-
-    "operating_cash_flow",
-
-    "capital_expenditure",
-
 }
-
-
 
 
 
