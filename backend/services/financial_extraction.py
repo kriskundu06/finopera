@@ -503,12 +503,12 @@ def _normalize_text(value: str) -> str:
 def _extract_statement(
     statement: str,
     passages: list[dict[str, Any]],
-) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, str]]:
     """Extract one statement and retain only values with verifiable evidence."""
     import math
 
     if not passages:
-        return {}, {}, []
+        return {}, {}, [], {}
 
     context, source_map = _build_context(passages, statement)
     extracted = _call_gemini(statement, context)
@@ -519,6 +519,7 @@ def _extract_statement(
 
     values: dict[str, Any] = {}
     evidence: dict[str, Any] = {}
+    field_status: dict[str, str] = {}
     valid_source_ids = {item["source_id"] for item in source_map}
 
     for field in STATEMENT_FIELDS[statement]:
@@ -563,6 +564,7 @@ def _extract_statement(
         # A value without a valid source and matching quote is not returned.
         if value is not None and source_id in valid_source_ids and quote_is_grounded:
             values[field] = value
+            field_status[field] = "verified"
             evidence[field] = {
                 "source_id": source_id,
                 "filename": matched_source["filename"],
@@ -572,6 +574,11 @@ def _extract_statement(
             }
         else:
             values[field] = None
+            field_status[field] = (
+                "evidence_rejected"
+                if raw_value is not None
+                else "not_found_in_retrieved_text"
+            )
             evidence[field] = None
 
             if raw_value is not None:
@@ -581,7 +588,7 @@ def _extract_statement(
                     f"quote_grounded={quote_is_grounded}"
                 )
 
-    return values, evidence, source_map
+    return values, evidence, source_map, field_status
 
 
 def _parse_row_amounts(
@@ -1006,6 +1013,7 @@ def extract_financials(
     financials: dict[str, Any] = {}
 
     evidence: dict[str, Any] = {}
+    field_status: dict[str, str] = {}
 
     all_sources = []
 
@@ -1022,14 +1030,16 @@ def extract_financials(
             for field in fields:
 
                 financials[field] = None
+            field_status[field] = "missing_evidence"
 
                 evidence[field] = None
+                field_status[field] = "no_relevant_passages"
 
             continue
 
 
 
-        values, field_evidence, source_map = _extract_statement(
+        values, field_evidence, source_map, statement_status = _extract_statement(
 
             statement,
 
@@ -1042,6 +1052,7 @@ def extract_financials(
         financials.update(values)
 
         evidence.update(field_evidence)
+        field_status.update(statement_status)
 
         all_sources.extend(source_map)
 
@@ -1084,6 +1095,17 @@ def extract_financials(
 
 
 
+    for field in NUMERIC_FIELDS:
+        if financials.get(field) is not None and evidence.get(field) is not None:
+            field_status[field] = (
+                "calculated"
+                if evidence[field].get("type") in {
+                    "calculated",
+                    "calculated_from_reported_components",
+                }
+                else "verified"
+            )
+
     revenue = financials.get("revenue")
 
     cost_of_revenue = financials.get("cost_of_revenue")
@@ -1105,6 +1127,7 @@ def extract_financials(
     ):
 
         financials["gross_profit"] = revenue - cost_of_revenue
+        field_status["gross_profit"] = "calculated"
 
         evidence["gross_profit"] = {
 
@@ -1199,6 +1222,7 @@ def extract_financials(
             field for field, value in financials.items()
             if value is not None and evidence.get(field) is not None
         ],
+        "field_status": field_status,
 
         "currency": currency,
 
