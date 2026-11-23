@@ -213,14 +213,10 @@ async def extract_pdf(file: UploadFile = File(...)):
                         )
 
                 if page_image_path is not None:
-                    image_note = (
-                        "[PAGE IMAGE AVAILABLE FOR VISUAL EXTRACTION. "
-                        "This note is indexing metadata, not source text. "
-                        "The original image may contain an income statement, "
-                        "balance sheet, cash flow statement, revenue, net income, "
-                        "total assets, total liabilities, total equity, operating "
-                        "activities, reporting-period headers and numeric amounts.]"
-                    )
+                    # Keep the marker deliberately content-free. Statement
+                    # relevance is scored separately from this metadata so
+                    # these words can never masquerade as extracted evidence.
+                    image_note = "[ORIGINAL PAGE IMAGE AVAILABLE FOR VISUAL EXTRACTION]"
                     page_text = f"{page_text}\n{image_note}".strip()
 
                 pages.append({
