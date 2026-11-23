@@ -3,23 +3,22 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from backend.services.vector_store import get_document_chunks, search_chunks
-load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+from backend.services.vector_store import get_document_chunks, search_chunks
+
+load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 MAX_CHARS_PER_PASSAGE = 6000
-
 MAX_PASSAGES_PER_STATEMENT = 8
-
 MAX_BALANCE_SHEET_PASSAGES = 18
-
 MAX_RESULTS_PER_QUERY = 8
-
 MAX_PASSAGES_PER_QUERY = 3
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -54,91 +53,49 @@ STATEMENT_QUERIES = {
 
 
 STATEMENT_FIELDS = {
-
     "income_statement": [
-
         "revenue",
-
         "cost_of_revenue",
-
         "gross_profit",
-
         "operating_income",
-
         "net_income",
-
     ],
-
     "balance_sheet": [
-
         "current_assets",
-
         "current_liabilities",
-
         "total_liabilities",
-
         "long_term_debt",
-
         "total_debt",
-
         "total_equity",
-
         "total_assets",
-
     ],
-
     "cash_flow": [
-
         "operating_cash_flow",
-
         "capital_expenditure",
-
     ],
-
     "reporting_details": [
-
         "currency",
-
         "units",
-
         "reporting_period",
-
     ],
-
 }
 
 
-
 NUMERIC_FIELDS = {
-
     "revenue",
-
     "cost_of_revenue",
-
     "gross_profit",
-
     "operating_income",
-
     "net_income",
-
     "current_assets",
-
     "current_liabilities",
-
     "total_liabilities",
-
     "long_term_debt",
-
     "total_debt",
-
     "total_equity",
-
     "total_assets",
-
     "operating_cash_flow",
-
     "capital_expenditure",
-
 }
 
 
