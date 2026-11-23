@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import math
 import re
 from io import BytesIO
 from pathlib import Path
@@ -16,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from backend.services.chunking import chunk_pages
-from backend.services.financial_analysis import calculate_financial_metrics
+from backend.services.financial_analysis import calculate_financial_metrics, safe_divide
 from backend.services.financial_extraction import extract_financials
 from backend.services.rag import answer_question, generate_due_diligence_report
 from backend.services.vector_store import index_chunks, search_chunks
@@ -84,7 +85,32 @@ def financial_analysis(request: FinancialAnalysisRequest):
     financials = request.model_dump()
 
     try:
-        return calculate_financial_metrics(financials)
+        result = calculate_financial_metrics(financials)
+        metrics = result["metrics"]
+
+        # Backward-compatible metrics exposed by this API endpoint only.
+        gross_margin = safe_divide(
+            financials.get("gross_profit"),
+            financials.get("revenue"),
+        )
+        metrics["gross_margin"] = (
+            round(gross_margin * 100, 2) if gross_margin is not None else None
+        )
+
+        operating_cash_flow = financials.get("operating_cash_flow")
+        capital_expenditure = financials.get("capital_expenditure")
+        valid_cash_flow_inputs = all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            for value in (operating_cash_flow, capital_expenditure)
+        )
+        metrics["free_cash_flow"] = (
+            round(operating_cash_flow - capital_expenditure, 2)
+            if valid_cash_flow_inputs
+            else None
+        )
+        return result
     except (TypeError, ValueError) as exc:
         logger.warning("Invalid financial-analysis input: %s", exc)
         raise HTTPException(
