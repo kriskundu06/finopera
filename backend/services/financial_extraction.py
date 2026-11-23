@@ -195,25 +195,29 @@ def _retrieve_statement_passages(
     statement_terms = {
         "income_statement": [
             "income statement", "statement of profit", "profit and loss",
-            "statement of operations", "revenue", "sales", "turnover",
-            "net income", "profit for the year", "gross profit",
+            "statement of operations", "revenue", "revenue from operations",
+            "sales", "net sales", "turnover", "net income", "net profit",
+            "profit after tax", "profit for the year", "gross profit",
             "operating profit", "earnings",
         ],
         "balance_sheet": [
             "balance sheet", "statement of financial position", "total assets",
             "current assets", "current liabilities", "shareholders equity",
-            "stockholders equity", "total equity", "borrowings", "debt",
+            "shareholders funds", "stockholders equity", "equity attributable to owners",
+            "total equity", "borrowings", "current borrowings",
+            "non-current borrowings", "debt",
             "trade payables", "reserves",
         ],
         "cash_flow": [
             "cash flow", "cash flows", "operating activities",
-            "investing activities", "financing activities",
+            "net cash from operating activities", "investing activities",
+            "financing activities",
             "capital expenditure", "property plant and equipment",
         ],
         "reporting_details": [
             "financial statements", "year ended", "period ended",
             "reporting period", "in thousands", "in millions", "in crores",
-            "rupees", "dollars", "consolidated",
+            "in lakhs", "rupees", "indian rupees", "dollars", "consolidated",
         ],
     }
 
