@@ -1091,7 +1091,8 @@ def extract_financials(
         document_id,
     )
 
-
+    if financials.get("total_debt") is None and field_status.get("total_debt") == "verified":
+        field_status["total_debt"] = "insufficient_components"
 
     for field in NUMERIC_FIELDS:
         if financials.get(field) is not None and evidence.get(field) is not None:
