@@ -170,31 +170,35 @@ USER QUESTION:
         "model": GEMINI_MODEL,
     }
 
-    # Contextual follow-ups are not cached; their meaning depends on conversation history.
-    try:
-        if history:
-            raise RuntimeError("Skip semantic cache for contextual follow-up")
-        cache_id = store_answer(
-            question=question,
-            document_id=document_id,
-            answer=answer,
-            sources=sources,
-            model=GEMINI_MODEL,
-        )
-        result["cache"] = {
-            "hit": False,
-            "stored": True,
-            "cache_id": cache_id,
-        }
-        logger.info("Stored semantic cache entry %s", cache_id)
-    except Exception:
-        if not history:
-            logger.exception("Could not store semantic cache entry.")
+    # Contextual follow-ups are not cached because their meaning depends on history.
+    if history:
         result["cache"] = {
             "hit": False,
             "stored": False,
-            "reason": "cache_store_failed",
+            "reason": "contextual_follow_up",
         }
+    else:
+        try:
+            cache_id = store_answer(
+                question=question,
+                document_id=document_id,
+                answer=answer,
+                sources=sources,
+                model=GEMINI_MODEL,
+            )
+            result["cache"] = {
+                "hit": False,
+                "stored": True,
+                "cache_id": cache_id,
+            }
+            logger.info("Stored semantic cache entry %s", cache_id)
+        except Exception:
+            logger.exception("Could not store semantic cache entry.")
+            result["cache"] = {
+                "hit": False,
+                "stored": False,
+                "reason": "cache_store_failed",
+            }
 
     return result
 
