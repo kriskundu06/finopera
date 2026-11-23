@@ -20,6 +20,8 @@ MAX_PASSAGES_PER_STATEMENT = 8
 MAX_BALANCE_SHEET_PASSAGES = 18
 MAX_RESULTS_PER_QUERY = 8
 MAX_PASSAGES_PER_QUERY = 3
+MAX_VISION_IMAGES_PER_REQUEST = 8
+MAX_VISION_IMAGE_BYTES_PER_REQUEST = 16 * 1024 * 1024
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DOCUMENT_PAGE_IMAGES = PROJECT_ROOT / "data" / "document_pages"
@@ -202,6 +204,12 @@ def _retrieve_statement_passages(
                 count = text.count(term)
                 if count:
                     score += min(count, 3) * (3.0 if " " in term else 1.0)
+            # A preserved image is a real visual source even when OCR
+            # returns no useful text. Give it a modest candidate boost without
+            # injecting fake statement keywords into the searchable text.
+            if passage.get("image_path") and Path(passage["image_path"]).is_file():
+                score += 8.0
+
             # Tables with many numeric cells are often the actual statement.
             numeric_tokens = re.findall(r"(?<![A-Za-z])\(?\d[\d,]*(?:\.\d+)?\)?", text)
             if len(numeric_tokens) >= 8:
@@ -519,13 +527,33 @@ DOCUMENT EXCERPTS:
     try:
 
         contents: list[Any] = [prompt]
+        attached_image_count = 0
+        attached_image_bytes = 0
+
         for source in source_map or []:
+            source["image_attached"] = False
             image_path = source.get("image_path")
             if not image_path:
                 continue
+
             image_file = Path(image_path)
             if not image_file.is_file():
                 continue
+
+            image_size = image_file.stat().st_size
+            if attached_image_count >= MAX_VISION_IMAGES_PER_REQUEST:
+                print(
+                    f"Vision image limit reached for {statement}; "
+                    f"skipping PDF page {source.get('page')}."
+                )
+                continue
+            if attached_image_bytes + image_size > MAX_VISION_IMAGE_BYTES_PER_REQUEST:
+                print(
+                    f"Vision image byte limit reached for {statement}; "
+                    f"skipping PDF page {source.get('page')}."
+                )
+                continue
+
             contents.append(
                 f"Original page image for source {source['source_id']} "
                 f"(PDF page {source['page']}, file {source['filename']}). "
@@ -537,6 +565,14 @@ DOCUMENT EXCERPTS:
                     mime_type="image/png",
                 )
             )
+            source["image_attached"] = True
+            attached_image_count += 1
+            attached_image_bytes += image_size
+
+        print(
+            f"Attached {attached_image_count} visual page(s) "
+            f"({attached_image_bytes} bytes) for {statement}."
+        )
 
         response = client.models.generate_content(
 
@@ -693,6 +729,7 @@ def _extract_statement(
 
         visual_source_available = (
             matched_source is not None
+            and bool(matched_source.get("image_attached"))
             and bool(matched_source.get("image_path"))
             and Path(matched_source["image_path"]).is_file()
         )
