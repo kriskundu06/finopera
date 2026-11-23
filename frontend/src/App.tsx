@@ -155,6 +155,10 @@ type FinancialAnalysisResponse = {
 
   evidence?: Record<string, any>
 
+  field_status?: Record<string, string>
+
+  verified_fields?: string[]
+
   sources?: Array<{ source?: string; page?: number }>
 
   currency?: string
@@ -1566,6 +1570,48 @@ function App() {
             ))}
 
           </section>
+
+          {financialResult && (
+            <section className="rounded-2xl border border-white/[0.07] bg-[#0e1422] p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Extraction coverage</h3>
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    Field-level results from this report. Missing values are not treated as zero.
+                  </p>
+                </div>
+                <span className="rounded-lg border border-emerald-400/15 bg-emerald-400/[0.06] px-2.5 py-1 text-[11px] text-emerald-300">
+                  {financialResult.verified_fields?.length ?? 0} verified fields
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {Object.entries(financialResult.field_status ?? {}).map(([field, status]) => {
+                  const descriptions: Record<string, string> = {
+                    verified: 'Value supported by a source quotation',
+                    calculated: 'Calculated from verified report values',
+                    evidence_rejected: 'Model found a value, but its evidence did not pass validation',
+                    not_found_in_retrieved_text: 'No value returned from the passages retrieved',
+                    no_relevant_passages: 'No relevant passages were retrieved for this statement',
+                    missing_evidence: 'Value removed because supporting evidence was missing',
+                  }
+                  const isVerified = status === 'verified' || status === 'calculated'
+                  return (
+                    <div key={field} className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium capitalize text-slate-200">{field.replace(/_/g, ' ')}</span>
+                        <span className={`rounded-md px-2 py-1 text-[10px] ${isVerified ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}>
+                          {status.replace(/_/g, ' ')}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-[11px] leading-5 text-slate-500">
+                        {descriptions[status] ?? 'Extraction status unavailable'}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
 
           <section className="grid grid-cols-1 gap-5">
 
