@@ -119,14 +119,20 @@ USER QUESTION:
 {question}
 """
 
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config={
-            "temperature": 0.1,
-            "max_output_tokens": 1200,
-        },
-    )
+    try:
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config={
+                "temperature": 0.1,
+                "max_output_tokens": 1200,
+            },
+        )
+    except Exception as exc:
+        logger.exception("Gemini request failed during document question answering")
+        raise RuntimeError(
+            "The AI answer provider could not complete the request."
+        ) from exc
 
     answer = response.text
 
