@@ -250,7 +250,7 @@ async def extract_pdf(file: UploadFile = File(...)):
 
 
 @app.get("/documents/{document_id}/download")
-def download_original_document(document_id: str):
+def download_original_document(document_id: str, filename: str | None = Query(default=None, max_length=255)):
     document_id = validate_document_id(document_id)
     pdf_path = UPLOAD_DIR / f"{document_id}.pdf"
 
@@ -263,7 +263,7 @@ def download_original_document(document_id: str):
     return FileResponse(
         path=pdf_path,
         media_type="application/pdf",
-        filename=f"{document_id}.pdf",
+        filename=Path(filename).name if filename and Path(filename).name.lower().endswith(".pdf") else f"{document_id}.pdf",
     )
 
 
