@@ -517,6 +517,9 @@ Rules:
   until the reporting-period column is unambiguous. For quarterly values, use
   the latest quarter column, not a six-month cumulative or prior-year column.
 - Use the original image to resolve OCR errors and row/column alignment.
+- Bracketed page-image indexing notes are system metadata, not report content.
+  Never quote those notes as evidence; cite only text visible in the report or
+  the attached original page image.
 
 - For currency and units, use explicit reporting labels.
 
