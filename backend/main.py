@@ -119,7 +119,7 @@ def financial_analysis(request: FinancialAnalysisRequest):
         ) from exc
 
 
-# Allow the local React development server to call the API.
+# Allow local development and Vercel-hosted frontends to call the API.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -128,8 +128,9 @@ app.add_middleware(
         "http://localhost:5174",
         "http://127.0.0.1:5174",
     ],
-    # Accept Vite's changing local dev ports without opening credentialed CORS.
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    # Vercel preview/production domains plus Vite's changing local dev ports.
+    # Credentials remain disabled; set FRONTEND_ORIGIN for a custom domain.
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?|https://[a-zA-Z0-9-]+\.vercel\.app",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
