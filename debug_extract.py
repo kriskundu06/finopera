@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import logging
 import re
+from pathlib import Path
 from collections import defaultdict
 
 from backend.services.financial_extraction import (
@@ -51,6 +52,14 @@ def main() -> None:
 
     print(f"Indexed chunks: {len(chunks)}")
     print(f"Indexed pages: {len(pages)}")
+    image_dir = Path(__file__).resolve().parent / "data" / "document_pages" / args.document_id
+    print(f"Page-image directory: {image_dir}")
+    image_pages = sorted(
+        int(match.group(1))
+        for image in image_dir.glob("page_*.png")
+        if (match := re.fullmatch(r"page_(\\d+)\\.png", image.name))
+    ) if image_dir.is_dir() else []
+    print(f"Persisted page images: {len(image_pages)}; pages={image_pages}")
     all_text = "\\n".join(text for values in pages.values() for text in values)
 
     print("\\nDOCUMENT COVERAGE")
@@ -65,7 +74,11 @@ def main() -> None:
     print("\\nSELECTED PAGES")
     for statement, passages in selected.items():
         selected_pages = sorted({p.get("page") for p in passages if p.get("page") is not None})
-        print(f"{statement}: {len(passages)} chunks; pages={selected_pages}")
+        missing_images = sorted(set(selected_pages) - set(image_pages))
+        print(
+            f"{statement}: {len(passages)} chunks; pages={selected_pages}; "
+            f"selected_pages_without_images={missing_images}"
+        )
 
     print("\\nEXTRACTION (structured rejection details are logged above)")
     result = extract_financials(args.document_id)
@@ -80,10 +93,13 @@ def main() -> None:
     for field in sorted(NUMERIC_FIELDS):
         value = financials.get(field)
         reference = evidence.get(field)
-        status = "verified" if value is not None and reference else "not_verified"
+        field_status = result.get("field_status", {}).get(field, {})
+        status = field_status.get("status") or (
+            "verified" if value is not None and reference else "not_verified"
+        )
         print(
-            f"{field}: status={status}; value={value}; "
-            f"page={reference.get('page') if reference else None}; "
+            f"{field}: status={status}; reason={field_status.get('reason')}; "
+            f"value={value}; page={reference.get('page') if reference else None}; "
             f"quote={reference.get('quote') if reference else None}"
         )
 
