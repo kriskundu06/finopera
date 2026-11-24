@@ -680,6 +680,7 @@ def _extract_statement(
 
     values: dict[str, Any] = {}
     evidence: dict[str, Any] = {}
+    rejection_reasons: dict[str, str] = {}
     valid_source_ids = {item["source_id"] for item in source_map}
 
     for field in STATEMENT_FIELDS[statement]:
@@ -758,7 +759,11 @@ def _extract_statement(
             }, ensure_ascii=False, default=str),
         )
 
-        # A value without a valid source and matching quote is not returned.
+        if rejection_reason:
+            rejection_reasons[field] = rejection_reason
+
+        # A value without a valid source, matching quote, and matching number
+        # is not returned.
         value_is_supported = (
             field not in NUMERIC_FIELDS
             or _quote_contains_value(raw_value, quote)
@@ -782,7 +787,7 @@ def _extract_statement(
             values[field] = None
             evidence[field] = None
 
-    return values, evidence, source_map
+    return values, evidence, source_map, rejection_reasons
 
 
 def _parse_row_amounts(
@@ -1151,6 +1156,8 @@ def extract_financials(
 
 
     statement_errors: dict[str, str] = {}
+    rejection_reasons: dict[str, str] = {}
+    statements_without_passages: set[str] = set()
 
     for statement, fields in STATEMENT_FIELDS.items():
         # Join chunks from the same page before LLM extraction so table
@@ -1158,16 +1165,18 @@ def extract_financials(
         passages = _merge_passages_by_page(grouped.get(statement, []))
 
         if not passages:
+            statements_without_passages.add(statement)
             for field in fields:
                 financials[field] = None
                 evidence[field] = None
             continue
 
         try:
-            values, field_evidence, source_map = _extract_statement(
+            values, field_evidence, source_map, field_rejections = _extract_statement(
                 statement,
                 passages,
             )
+            rejection_reasons.update(field_rejections)
         except RuntimeError as exc:
             # Keep successful statements; a temporary provider outage for one
             # statement must not discard already extracted, evidenced values.
@@ -1206,6 +1215,13 @@ def extract_financials(
             ),
             "extraction_status": "failed" if statement_errors else "no_evidence",
             "statement_errors": statement_errors,
+            "field_status": {
+                field: {
+                    "status": "extraction_error" if statement_errors.get(next((s for s, fs in STATEMENT_FIELDS.items() if field in fs), "")) else "not_present_in_document",
+                    "reason": "statement_extraction_failed" if statement_errors else "no_statement_passages_selected",
+                }
+                for field in NUMERIC_FIELDS
+            },
 
         }
 
@@ -1343,12 +1359,35 @@ def extract_financials(
     extraction_summary = _build_extraction_status(
         financials, evidence, statement_errors
     )
+    field_status = {}
+    for field in sorted(NUMERIC_FIELDS):
+        statement = next(
+            name for name, fields in STATEMENT_FIELDS.items() if field in fields
+        )
+        if financials.get(field) is not None and evidence.get(field):
+            field_status[field] = {"status": "verified", "reason": None}
+        elif statement in statement_errors:
+            field_status[field] = {
+                "status": "extraction_error",
+                "reason": "statement_extraction_failed",
+            }
+        elif statement in statements_without_passages:
+            field_status[field] = {
+                "status": "not_present_in_document",
+                "reason": "no_statement_passages_selected",
+            }
+        else:
+            field_status[field] = {
+                "status": "not_verified",
+                "reason": rejection_reasons.get(field, "null_from_model"),
+            }
 
     return {
         "document_id": document_id,
         "financials": financials,
         "evidence": evidence,
         **extraction_summary,
+        "field_status": field_status,
         "currency": currency,
         "units": units,
         "reporting_period": reporting_period,
