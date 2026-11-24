@@ -1174,6 +1174,9 @@ def extract_financials(
         document_id=document_id,
         filename=filename,
     )
+    document_passages = [item for items in grouped.values() for item in items]
+    filing_format = _detect_filing_format(document_passages)
+    logger.info("Document filing format selected: %s", filing_format)
 
 
 
@@ -1257,18 +1260,23 @@ def extract_financials(
 
 
 
-    _apply_income_statement_fallback(
-        _merge_passages_by_page(grouped.get("income_statement", [])),
-        financials,
-        evidence,
-    )
+    # The legacy deterministic fallback assumes a latest-first comparative
+    # column. Indian SEBI tables can contain six distinct period columns, so
+    # do not apply that shortcut to Ind AS filings; the model must identify
+    # the requested period from explicit headers and pass quote validation.
+    if filing_format != "india_ind_as":
+        _apply_income_statement_fallback(
+            _merge_passages_by_page(grouped.get("income_statement", [])),
+            financials,
+            evidence,
+        )
 
-    _apply_balance_sheet_fallback(
-        _merge_passages_by_page(grouped.get("balance_sheet", [])),
-        financials,
-        evidence,
-        document_id,
-    )
+        _apply_balance_sheet_fallback(
+            _merge_passages_by_page(grouped.get("balance_sheet", [])),
+            financials,
+            evidence,
+            document_id,
+        )
 
 
 
