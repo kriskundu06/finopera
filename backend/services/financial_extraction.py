@@ -4,6 +4,7 @@ import os
 import re
 import time
 from typing import Any
+from pathlib import Path
 from dotenv import load_dotenv
 from google import genai
 from backend.services.vector_store import get_document_chunks, search_chunks
@@ -624,6 +625,27 @@ def _normalize_text(value: str) -> str:
 
 
 
+def _quote_contains_value(value: Any, quote: Any) -> bool:
+    """Diagnostic-only numeric presence check; does not relax evidence validation."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    if not isinstance(quote, str) or not quote.strip():
+        return False
+    numeric_tokens = re.findall(r"(?<![\\w.])\\(?-?\\d[\\d,]*(?:\\.\\d+)?\\)?", quote)
+    try:
+        expected = float(value)
+    except (TypeError, ValueError):
+        return False
+    for token in numeric_tokens:
+        cleaned = token.replace(",", "").replace("(", "-").replace(")", "")
+        try:
+            if float(cleaned) == expected:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def _extract_statement(
     statement: str,
     passages: list[dict[str, Any]],
@@ -684,6 +706,43 @@ def _extract_statement(
             and _normalize_text(quote) in _normalize_text(matched_source["text"])
         )
 
+        # Diagnostic reason is retained in structured logs before the
+        # unverified value is discarded. This phase deliberately does not
+        # change the accepted/rejected value behavior.
+        rejection_reason = None
+        if value is None:
+            rejection_reason = "null_from_model"
+        elif source_id not in valid_source_ids:
+            rejection_reason = "invalid_source_id"
+        elif not quote_is_grounded:
+            page = matched_source.get("page") if matched_source else None
+            page_image = (
+                Path(__file__).resolve().parents[2]
+                / "data" / "document_pages" / str(
+                    passages[0].get("document_id", "")
+                ) / f"page_{page}.png"
+            )
+            rejection_reason = (
+                "quote_not_in_source_text"
+                if page_image.is_file()
+                else "no_page_image_for_visual_quote"
+            )
+        elif field in NUMERIC_FIELDS and not _quote_contains_value(raw_value, quote):
+            rejection_reason = "value_not_in_quote"
+
+        logger.info(
+            "financial_field_diagnostic %s",
+            json.dumps({
+                "statement": statement,
+                "field": field,
+                "raw_model_value": raw_value,
+                "source_id": source_id,
+                "quote": quote,
+                "rejection_reason": rejection_reason,
+                "source_page": matched_source.get("page") if matched_source else None,
+            }, ensure_ascii=False, default=str),
+        )
+
         # A value without a valid source and matching quote is not returned.
         if value is not None and source_id in valid_source_ids and quote_is_grounded:
             values[field] = value
@@ -697,13 +756,6 @@ def _extract_statement(
         else:
             values[field] = None
             evidence[field] = None
-
-            if raw_value is not None:
-                print(
-                    f"Evidence validation rejected {statement}.{field}: "
-                    f"source_id_valid={source_id in valid_source_ids}, "
-                    f"quote_grounded={quote_is_grounded}"
-                )
 
     return values, evidence, source_map
 
