@@ -1199,6 +1199,50 @@ def _apply_balance_sheet_fallback(
     # automatically equivalent to borrowings.
 
 
+def _calculate_total_debt(
+    components: dict[str, dict[str, Any]],
+    components_complete: bool,
+) -> tuple[float | None, dict[str, Any] | None]:
+    """Sum independently evidenced debt components only when coverage is complete."""
+    if not components_complete or not components:
+        return None, None
+
+    allowed_components = {
+        "short_term_debt",
+        "current_portion_long_term_debt",
+        "long_term_debt",
+    }
+    if not set(components).issubset(allowed_components):
+        return None, None
+
+    amounts = []
+    for component in components.values():
+        if not isinstance(component, dict):
+            return None, None
+        value = component.get("value")
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or value < 0
+        ):
+            return None, None
+        amounts.append(float(value))
+
+    total = sum(amounts)
+    if not math.isfinite(total):
+        return None, None
+
+    return total, {
+        "type": "calculated",
+        "formula": "sum of verified interest-bearing debt components",
+        "value": total,
+        "inputs": components,
+        "component_count": len(components),
+        "components_complete": True,
+    }
+
+
 def _build_extraction_status(
     financials: dict[str, Any],
     evidence: dict[str, Any],
@@ -1363,25 +1407,13 @@ def extract_financials(
     # has independently passed source-quote validation.
     debt_components = financials.pop("_debt_components", {})
     debt_components_complete = financials.pop("_debt_components_complete", False)
-    if (
-        financials.get("total_debt") is None
-        and debt_components_complete
-        and isinstance(debt_components, dict)
-        and debt_components
-    ):
-        component_total = sum(
-            float(item["value"]) for item in debt_components.values()
+    if financials.get("total_debt") is None:
+        component_total, calculated_debt_evidence = _calculate_total_debt(
+            debt_components, debt_components_complete
         )
-        if math.isfinite(component_total):
+        if component_total is not None and calculated_debt_evidence is not None:
             financials["total_debt"] = component_total
-            evidence["total_debt"] = {
-                "type": "calculated",
-                "formula": "sum of verified interest-bearing debt components",
-                "value": component_total,
-                "inputs": debt_components,
-                "component_count": len(debt_components),
-                "components_complete": True,
-            }
+            evidence["total_debt"] = calculated_debt_evidence
 
     revenue = financials.get("revenue")
 
