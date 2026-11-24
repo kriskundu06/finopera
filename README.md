@@ -2,6 +2,10 @@
 
 FinOpera is a financial document analysis application that uses retrieval-augmented generation (RAG) to help users extract financial information from company reports, calculate financial ratios, ask questions about source documents, and review potential financial risk indicators.
 
+## Dashboard Preview
+
+![FinOpera financial overview dashboard](docs/assets/finopera-dashboard.jpg)
+
 ## Features
 
 - **PDF processing:** Extract text from financial documents and organize it into page-aware chunks.
