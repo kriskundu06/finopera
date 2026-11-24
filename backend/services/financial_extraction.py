@@ -38,7 +38,11 @@ STATEMENT_QUERIES = {
     "balance_sheet": [
         "consolidated balance sheet total assets total liabilities total equity",
         "total current assets total current liabilities total debt borrowings",
-        "total stockholders equity shareholders equity",
+        "total stockholders equity shareholders equity long-term debt",
+    ],
+    "cash_flow_statement": [
+        "consolidated statements of cash flows net cash provided by operating activities",
+        "purchases of property and equipment capital expenditures",
     ],
     "reporting_details": [
         "financial statements reporting currency units in thousands millions",
@@ -56,9 +60,14 @@ STATEMENT_FIELDS = {
     "balance_sheet": [
         "current_assets",
         "current_liabilities",
+        "long_term_debt",
         "total_debt",
         "total_equity",
         "total_assets",
+    ],
+    "cash_flow_statement": [
+        "operating_cash_flow",
+        "capital_expenditure",
     ],
     "reporting_details": [
         "currency",
@@ -74,9 +83,12 @@ NUMERIC_FIELDS = {
     "net_income",
     "current_assets",
     "current_liabilities",
+    "long_term_debt",
     "total_debt",
     "total_equity",
     "total_assets",
+    "operating_cash_flow",
+    "capital_expenditure",
 }
 
 
@@ -100,6 +112,13 @@ def _statement_relevance_score(text: str, statement: str) -> int:
             r"total equity|equity attributable|total shareholders",
             r"borrowings|lease liabilities|debt",
             r"as at|30 september|30 september 2026",
+        )
+    elif statement == "cash_flow_statement":
+        patterns = (
+            r"consolidated statements? of cash flows|statement of cash flows",
+            r"net cash provided by.*operating activities|operating activities",
+            r"purchases of property and equipment|capital expenditures",
+            r"three months ended|quarter ended",
         )
     else:
         patterns = (
@@ -137,6 +156,7 @@ def _retrieve_statement_passages(
     limits = {
         "income_statement": 10,
         "balance_sheet": MAX_BALANCE_SHEET_PASSAGES,
+        "cash_flow_statement": 12,
         "reporting_details": 10,
     }
 
@@ -173,7 +193,7 @@ def _retrieve_statement_passages(
             # Keep retrieval focused: page-coherent chunks preserve every
             # chunk on selected pages, but adjacent-page expansion caused
             # unrelated narrative pages to flood the model context.
-            page_limit = 10 if statement == "balance_sheet" else 6
+            page_limit = 10 if statement == "balance_sheet" else 8 if statement == "cash_flow_statement" else 6
             selected_pages = set(ranked_pages[:page_limit])
             selected = [
                 chunk for chunk in document_chunks
@@ -435,6 +455,20 @@ Indian Ind AS / SEBI filing guidance:
   return null rather than guessing.
 """
 
+    if statement == "cash_flow_statement":
+        statement_rules += """
+For the cash flow statement:
+- Prefer the consolidated statement of cash flows.
+- operating_cash_flow is the explicitly labelled net cash provided by (used in)
+  operating activities row.
+- capital_expenditure is purchases of property and equipment, representing cash
+  spent. Return a positive amount even if shown in parentheses.
+- For quarterly filings with three-month and nine-month columns, select the
+  latest three-month quarter, not the year-to-date column.
+- Provide an exact contiguous source quote containing the selected amount.
+- Do not substitute narrative cash-capex estimates for the cash flow statement.
+"""
+
     if statement == "balance_sheet":
 
         statement_rules += """
@@ -510,6 +544,7 @@ Rules:
 - Do not derive gross profit; Python may calculate it separately.
 
 - Capital expenditure must be a positive amount representing cash spent.
+- For quarterly cash-flow statements, select the latest three-month column.
 
 - For each non-null value, provide an exact, contiguous quote copied from the
   supplied excerpt and its source_id. Do not rewrite table rows or insert separators.
@@ -1241,6 +1276,26 @@ def _apply_income_statement_fallback(
     _apply_statement_row_fallback(passages, financials, evidence, rows, stops)
 
 
+def _apply_cash_flow_fallback(
+    passages: list[dict[str, Any]],
+    financials: dict[str, Any],
+    evidence: dict[str, Any],
+) -> None:
+    """Recover cash-flow rows only when the latest quarter is unambiguous."""
+    rows = {
+        "operating_cash_flow": r"\bNet cash provided by \(used in\) operating activities\b|\bNet cash provided by operating activities\b",
+        "capital_expenditure": r"\bPurchases of property and equipment\b",
+    }
+    stops = [
+        r"\bNet cash provided by \(used in\) operating activities\b",
+        r"\bInvesting activities\b",
+        r"\bFinancing activities\b",
+        r"\bProceeds from property and equipment sales\b",
+        r"\bAcquisitions\b",
+    ]
+    _apply_statement_row_fallback(passages, financials, evidence, rows, stops)
+
+
 def _apply_balance_sheet_fallback(
     passages: list[dict[str, Any]],
     financials: dict[str, Any],
@@ -1251,6 +1306,7 @@ def _apply_balance_sheet_fallback(
     rows = {
         "current_assets": r"\bTotal current assets\b",
         "current_liabilities": r"\bTotal current liabilities\b",
+        "long_term_debt": r"\bLong-term debt\b",
         "total_debt": r"\bTotal debt\b|\bTotal borrowings\b",
         "total_equity": r"\bTotal equity\b|\bTotal stockholders[’']?\s+equity\b",
         "total_assets": r"\bTotal assets\b",
@@ -1258,6 +1314,7 @@ def _apply_balance_sheet_fallback(
     stops = [
         r"\bTotal current assets\b",
         r"\bTotal current liabilities\b",
+        r"\bLong-term debt\b",
         r"\bTotal assets\b",
         r"\bEquity and liabilities\b",
         r"\bTotal equity\b",
@@ -1478,6 +1535,11 @@ def extract_financials(
             evidence,
             document_id,
         )
+        _apply_cash_flow_fallback(
+            _merge_passages_by_page(grouped.get("cash_flow_statement", [])),
+            financials,
+            evidence,
+        )
 
 
 
@@ -1548,6 +1610,48 @@ def extract_financials(
         if financials.get(field) is not None and evidence.get(field) is None:
             print(f"Final evidence audit cleared unsupported field: {field}")
             financials[field] = None
+
+    # Recover explicit SEC metadata from retrieved statement headers if the
+    # separate metadata extraction call did not yield a verified value.
+    metadata_passages = [
+        passage
+        for statement in ("income_statement", "balance_sheet", "cash_flow_statement", "reporting_details")
+        for passage in _merge_passages_by_page(grouped.get(statement, []))
+    ]
+    metadata_text = "\n".join(str(item.get("text", "")) for item in metadata_passages)
+
+    if not financials.get("currency") and re.search(r"\\$\\s*\\d|\\bUSD\\b", metadata_text, re.IGNORECASE):
+        financials["currency"] = "USD"
+        metadata_source = next((item for item in metadata_passages if re.search(r"\\$\\s*\\d|\\bUSD\\b", str(item.get("text", "")), re.IGNORECASE)), None)
+        if metadata_source:
+            evidence["currency"] = {
+                "filename": metadata_source.get("source", "unknown"),
+                "page": metadata_source.get("page", "unknown"),
+                "quote": "USD indicated by dollar-denominated financial statement amounts",
+                "type": "document_metadata",
+            }
+
+    if not financials.get("reporting_period"):
+        period_match = re.search(
+            r"(Three|Six|Nine|Twelve) Months Ended\\s+"
+            r"(January|February|March|April|May|June|July|August|September|October|November|December)\\s+"
+            r"(\\d{1,2}),?\\s+(\\d{4})",
+            metadata_text,
+            re.IGNORECASE,
+        )
+        if period_match:
+            financials["reporting_period"] = (
+                f"{period_match.group(1)} Months Ended {period_match.group(2)} "
+                f"{period_match.group(3)}, {period_match.group(4)}"
+            )
+            metadata_source = next((item for item in metadata_passages if period_match.group(0) in str(item.get("text", ""))), None)
+            if metadata_source:
+                evidence["reporting_period"] = {
+                    "filename": metadata_source.get("source", "unknown"),
+                    "page": metadata_source.get("page", "unknown"),
+                    "quote": period_match.group(0),
+                    "type": "document_metadata",
+                }
 
     currency = financials.get("currency") or "unspecified"
 
