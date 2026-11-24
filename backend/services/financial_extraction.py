@@ -1284,7 +1284,7 @@ def _apply_cash_flow_fallback(
     """Recover cash-flow rows only when the latest quarter is unambiguous."""
     rows = {
         "operating_cash_flow": r"\bNet cash provided by \(used in\) operating activities\b|\bNet cash provided by operating activities\b",
-        "capital_expenditure": r"\bPurchases of property and equipment\b",
+        "capital_expenditure": r"\bPurchases of property and equipment\b|\bCapital expenditures?\b",
     }
     stops = [
         r"\bNet cash provided by \(used in\) operating activities\b",
@@ -1294,6 +1294,11 @@ def _apply_cash_flow_fallback(
         r"\bAcquisitions\b",
     ]
     _apply_statement_row_fallback(passages, financials, evidence, rows, stops)
+    # Cash purchases are displayed as negative outflows in many SEC cash-flow
+    # statements. Store capex as a positive spend while retaining the original
+    # signed source quote for auditability.
+    if isinstance(financials.get("capital_expenditure"), (int, float)) and not isinstance(financials.get("capital_expenditure"), bool):
+        financials["capital_expenditure"] = abs(financials["capital_expenditure"])
 
 
 def _apply_balance_sheet_fallback(
@@ -1628,6 +1633,32 @@ def extract_financials(
                 "filename": metadata_source.get("source", "unknown"),
                 "page": metadata_source.get("page", "unknown"),
                 "quote": "USD indicated by dollar-denominated financial statement amounts",
+                "type": "document_metadata",
+            }
+
+    # For a quarterly SEC filing, prefer an explicit three-month period from
+    # the statements over a model-supplied YTD/annual label. Do not infer a
+    # period from the fiscal-year end alone.
+    three_month_match = re.search(
+        r"Three Months Ended\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s*(\d{4})(?:\s+(\d{4}))?",
+        metadata_text,
+        re.IGNORECASE,
+    )
+    if three_month_match:
+        latest_year = three_month_match.group(4) or three_month_match.group(3)
+        financials["reporting_period"] = (
+            f"Three Months Ended {three_month_match.group(1)} "
+            f"{three_month_match.group(2)}, {latest_year}"
+        )
+        metadata_source = next(
+            (item for item in metadata_passages if three_month_match.group(0) in str(item.get("text", ""))),
+            None,
+        )
+        if metadata_source:
+            evidence["reporting_period"] = {
+                "filename": metadata_source.get("source", "unknown"),
+                "page": metadata_source.get("page", "unknown"),
+                "quote": three_month_match.group(0),
                 "type": "document_metadata",
             }
 
