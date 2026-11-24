@@ -4,7 +4,7 @@ FinOpera is a financial document analysis application that uses retrieval-augmen
 
 ## Dashboard Preview
 
-![FinOpera financial overview dashboard](docs/assets/finopera-dashboard.png)
+![FinOpera financial overview dashboard](docs/assets/finopera-dashboard.jpg)
 
 ## Features
 
