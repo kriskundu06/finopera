@@ -138,27 +138,46 @@ def _retrieve_statement_passages(
     }
 
     if document_chunks:
+        # Rank pages, not isolated chunks. A statement table is often split
+        # across adjacent chunks; selecting only the highest-scoring chunks
+        # can drop the actual total rows or the column headings needed to
+        # interpret them.
         for statement in STATEMENT_FIELDS:
-            ranked = []
+            scores_by_page: dict[int, int] = {}
             for chunk in document_chunks:
+                page = chunk.get("page")
+                if not isinstance(page, int):
+                    continue
                 score = _statement_relevance_score(
                     str(chunk.get("text", "")), statement
                 )
                 if score:
-                    ranked.append((score, chunk))
-            ranked.sort(
-                key=lambda pair: (
-                    -pair[0],
-                    pair[1].get("page") if isinstance(pair[1].get("page"), int) else 0,
-                    pair[1].get("chunk_number") if isinstance(pair[1].get("chunk_number"), int) else 0,
+                    scores_by_page[page] = max(scores_by_page.get(page, 0), score)
+            ranked_pages = sorted(
+                scores_by_page,
+                key=lambda page: (-scores_by_page[page], page),
+            )
+            page_limit = 10 if statement == "balance_sheet" else 6
+            selected_pages = set(ranked_pages[:page_limit])
+            selected = [
+                chunk for chunk in document_chunks
+                if chunk.get("page") in selected_pages
+            ]
+            selected.sort(
+                key=lambda chunk: (
+                    chunk.get("page") if isinstance(chunk.get("page"), int) else 0,
+                    chunk.get("chunk_number") if isinstance(chunk.get("chunk_number"), int) else 0,
                 )
             )
-            grouped[statement] = [
-                chunk for _, chunk in ranked[:limits[statement]]
-            ]
+            # Keep all chunks from the chosen statement pages, with a generous
+            # safety cap to prevent unrelated long reports exhausting context.
+            passage_limit = 40 if statement == "balance_sheet" else 24
+            grouped[statement] = selected[:passage_limit]
             logger.info(
-                "Selected %s deterministic %s passages from %s document chunks",
-                len(grouped[statement]), statement, len(document_chunks),
+                "Selected %s page-coherent %s passages across %s ranked pages "
+                "from %s document chunks",
+                len(grouped[statement]), statement, len(selected_pages),
+                len(document_chunks),
             )
         return grouped
 
@@ -901,6 +920,7 @@ def _apply_balance_sheet_fallback(
     rows = {
         "current_assets": r"\bTotal current assets\b",
         "current_liabilities": r"\bTotal current liabilities\b",
+        "total_debt": r"\bTotal debt\b|\bTotal borrowings\b",
         "total_equity": r"\bTotal equity\b|\bTotal stockholders[’']?\s+equity\b",
         "total_assets": r"\bTotal assets\b",
     }
@@ -920,41 +940,11 @@ def _apply_balance_sheet_fallback(
         passages, financials, evidence, rows, stops
     )
 
-    # Only derive total debt from explicitly reported debt components. Lease
-    # liabilities alone are not silently re-labelled as borrowings/total debt.
-    long_term_debt = financials.get("long_term_debt")
-    long_term_debt_is_valid = (
-        isinstance(long_term_debt, (int, float))
-        and not isinstance(long_term_debt, bool)
-        and long_term_debt >= 0
-        and evidence.get("long_term_debt") is not None
-    )
-    if not long_term_debt_is_valid:
-        return
-
-    current_portion_result = _find_current_debt_portion(passages, document_id)
-    if current_portion_result is None:
-        if evidence.get("total_debt", {}).get("type") != (
-            "calculated_from_reported_components"
-        ):
-            financials["total_debt"] = None
-            evidence["total_debt"] = None
-        logger.info("Total debt remains unavailable: no verified current-debt row.")
-        return
-
-    current_portion, source_passage, quote = current_portion_result
-    financials["total_debt"] = long_term_debt + current_portion
-    evidence["total_debt"] = {
-        "type": "calculated_from_reported_components",
-        "formula": "long_term_debt + current_portion_of_long_term_debt",
-        "long_term_debt": evidence["long_term_debt"],
-        "current_portion": {
-            "filename": str(source_passage.get("source", "unknown")),
-            "page": source_passage.get("page", "unknown"),
-            "quote": quote,
-            "value": current_portion,
-        },
-    }
+    # Total debt is populated only from an explicitly labelled total-debt
+    # or total-borrowings row (or a model extraction with matching evidence).
+    # Do not synthesize it from long-term debt: the core schema intentionally
+    # contains only the eight requested fields, and lease liabilities are not
+    # automatically equivalent to borrowings.
 
 
 def _build_extraction_status(
