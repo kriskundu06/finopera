@@ -140,9 +140,16 @@ type EvidenceReference = {
   formula?: string
 }
 
+type FieldStatus = {
+  status: 'verified' | 'not_verified' | 'not_present_in_document' | 'extraction_error'
+  reason?: string | null
+}
+
 type FinancialAnalysisResponse = {
 
   message?: string
+
+  field_status?: Record<string, FieldStatus>
 
   extraction_status?: 'completed' | 'partial' | 'failed' | 'no_evidence'
 
@@ -1000,7 +1007,7 @@ function App() {
                     {title:'Income statement',fields:[['Revenue','revenue'],['Cost of revenue','cost_of_revenue'],['Gross profit','gross_profit'],['Operating income','operating_income'],['Net income','net_income']]},
                     {title:'Balance sheet',fields:[['Current assets','current_assets'],['Current liabilities','current_liabilities'],['Long-term debt','long_term_debt'],['Total debt','total_debt'],['Total equity','total_equity'],['Total assets','total_assets']]},
                     {title:'Cash flow statement',fields:[['Operating cash flow','operating_cash_flow'],['Capital expenditure','capital_expenditure']]}
-                  ].map(group=><article key={group.title} className="rounded-2xl border border-white/[.07] bg-[#0e1422] p-5"><h3 className="font-semibold text-white">{group.title}</h3><div className="mt-3 divide-y divide-white/[.06]">{group.fields.map(([label,key])=>{const ref=getEvidenceReference(key);const value=financials[key];const verified=ref!==null;const calculated=ref?.type==='calculated'||ref?.type==='calculated_from_reported_components';return <div key={key} className="py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="text-xs text-slate-300">{label}</span><p className={`mt-1 text-[10px] ${calculated?'text-sky-300':verified?'text-emerald-300':'text-slate-500'}`}>{calculated?'Calculated from verified inputs':verified?'Verified · source evidence':'Unavailable · not verified'}</p></div><strong className="text-right text-sm text-white">{formatAmount(value,currency,units)}</strong></div>{ref&&<details className="mt-2"><summary className="cursor-pointer text-[10px] text-lime-300">{ref.filename || 'Source'} · Page {ref.page ?? '—'}{calculated?' · Calculation evidence':''}</summary>{ref.formula&&<p className="mt-2 text-[11px] text-sky-300">Formula: {ref.formula}</p>}{ref.quote&&<p className="mt-2 whitespace-pre-wrap rounded-lg bg-white/[.03] p-2 text-[11px] leading-5 text-slate-400">{ref.quote}</p>}</details>}</div>})}</div></article>)}
+                  ].map(group=><article key={group.title} className="rounded-2xl border border-white/[.07] bg-[#0e1422] p-5"><h3 className="font-semibold text-white">{group.title}</h3><div className="mt-3 divide-y divide-white/[.06]">{group.fields.map(([label,key])=>{const ref=getEvidenceReference(key);const value=financials[key];const status=financialResult.field_status?.[key];const verified=ref!==null;const calculated=ref?.type==='calculated'||ref?.type==='calculated_from_reported_components';const statusLabel=calculated?'Calculated from verified inputs':verified?'Verified · source evidence':status?.status==='not_present_in_document'?'Not found in indexed document':status?.status==='extraction_error'?'Extraction error':status?.reason? `Not verified · ${status.reason.replaceAll('_',' ')}`:'Unavailable · not verified';return <div key={key} className="py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="text-xs text-slate-300">{label}</span><p className={`mt-1 text-[10px] ${calculated?'text-sky-300':verified?'text-emerald-300':'text-slate-500'}`}>{statusLabel}</p></div><strong className="text-right text-sm text-white">{formatAmount(value,currency,units)}</strong></div>{ref&&<details className="mt-2"><summary className="cursor-pointer text-[10px] text-lime-300">{ref.filename || 'Source'} · Page {ref.page ?? '—'}{calculated?' · Calculation evidence':''}</summary>{ref.formula&&<p className="mt-2 text-[11px] text-sky-300">Formula: {ref.formula}</p>}{ref.quote&&<p className="mt-2 whitespace-pre-wrap rounded-lg bg-white/[.03] p-2 text-[11px] leading-5 text-slate-400">{ref.quote}</p>}</details>}</div>})}</div></article>)}
                 </div>
                 <p className="text-[11px] text-slate-600">Extraction is model-assisted. Verify material figures against the original PDF before relying on them.</p>
               </>}
