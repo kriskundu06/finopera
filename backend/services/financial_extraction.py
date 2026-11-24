@@ -221,6 +221,48 @@ def _retrieve_statement_passages(
     return grouped
 
 
+def _merge_passages_by_page(
+    passages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Join every selected chunk from the same PDF page into one source.
+
+    PDF text extraction can place table labels in one chunk and their numeric
+    columns in the next. Page-level joining gives the model the complete table
+    and keeps evidence tied to the original PDF page.
+    """
+    by_page: dict[tuple[str, Any], list[dict[str, Any]]] = {}
+    for passage in passages:
+        key = (str(passage.get("source", "unknown")), passage.get("page"))
+        by_page.setdefault(key, []).append(passage)
+
+    merged: list[dict[str, Any]] = []
+    for (source, page), page_chunks in by_page.items():
+        page_chunks.sort(
+            key=lambda item: (
+                item.get("chunk_number")
+                if isinstance(item.get("chunk_number"), int) else 0
+            )
+        )
+        merged.append({
+            "source": source,
+            "page": page,
+            "document_id": page_chunks[0].get("document_id"),
+            "chunk_number": 1,
+            "text": "\\n".join(
+                str(item.get("text", "")).strip()
+                for item in page_chunks
+                if str(item.get("text", "")).strip()
+            ),
+        })
+
+    return sorted(
+        merged,
+        key=lambda item: (
+            item.get("page") if isinstance(item.get("page"), int) else 0
+        ),
+    )
+
+
 def _build_context(
 
     passages: list[dict[str, Any]],
@@ -343,23 +385,22 @@ def _call_gemini(
 
 For the balance sheet:
 
-- total_equity means total stockholders' equity.
-
-- total_assets means the reported total assets.
-
-- long_term_debt means the reported long-term debt line.
-
-- total_debt must not be copied from long_term_debt unless explicitly
-
-  identified as total debt.
-
-- Do not treat total liabilities as total debt.
-
-- Use the latest reporting-date column (September 30, 2026 in this report) when the column ordering is clear.
-
-- Look carefully at the entire balance-sheet excerpt, including its
-
-  lower rows, before returning null for total_equity.
+- Prefer the page explicitly titled "Consolidated Balance Sheet". Do not use
+  shareholder-letter summaries, equity movement tables, standalone statements,
+  auditor commentary, or subsidiary disclosures when a consolidated balance
+  sheet is supplied.
+- total_equity means the row "Total equity" on that consolidated balance sheet,
+  not "Other equity", "Equity attributable to owners", or a note reference.
+- total_assets means the row "Total assets" on that same consolidated balance
+  sheet.
+- current_assets and current_liabilities must come from their explicitly
+  labelled total rows on that same consolidated balance sheet.
+- total_debt must be explicitly labelled "Total debt" or "Total borrowings".
+  Do not treat total liabilities or lease liabilities as total debt.
+- Use the latest reporting-date column and preserve its period/basis.
+- Table labels and their numeric columns may appear in separate text blocks
+  within the same page. Read the entire page and align rows with columns
+  using the table order and headings. Never take a nearby unrelated number.
 
 """
 
@@ -872,8 +913,29 @@ def _apply_statement_row_fallback(
             if not amounts:
                 continue
 
-            # The statement pages identify the newest period in the first
-            # column (Q2FY27 for P&L; 30 Sep 2026 for the balance sheet).
+            # This simple fallback is safe only when the row label and its
+            # numeric cells are adjacent in extracted text. If labels and
+            # columns are separated across a table/page layout, let the
+            # page-level model extraction interpret the full table instead
+            # of grabbing an unrelated first number.
+            label_match = re.search(label_pattern, text, flags=re.IGNORECASE)
+            if label_match is None:
+                continue
+            next_label_positions = [
+                match.start()
+                for other_pattern in row_patterns.values()
+                if other_pattern != label_pattern
+                for match in re.finditer(other_pattern, text[label_match.end():], flags=re.IGNORECASE)
+            ]
+            nearest_next_label = (
+                min(next_label_positions) if next_label_positions else len(text)
+            )
+            row_text = text[label_match.end():label_match.end() + nearest_next_label]
+            if len(row_text) > 160 or not re.search(r"\\d", row_text):
+                continue
+
+            # Multiple comparative amounts are accepted only because the
+            # table header in this same passage establishes latest-first order.
             value = amounts[0]
             financials[field] = value
             evidence[field] = {
@@ -1009,7 +1071,9 @@ def extract_financials(
     statement_errors: dict[str, str] = {}
 
     for statement, fields in STATEMENT_FIELDS.items():
-        passages = grouped.get(statement, [])
+        # Join chunks from the same page before LLM extraction so table
+        # headings, row labels, and numeric columns remain together.
+        passages = _merge_passages_by_page(grouped.get(statement, []))
 
         if not passages:
             for field in fields:
@@ -1066,13 +1130,13 @@ def extract_financials(
 
 
     _apply_income_statement_fallback(
-        grouped.get("income_statement", []),
+        _merge_passages_by_page(grouped.get("income_statement", [])),
         financials,
         evidence,
     )
 
     _apply_balance_sheet_fallback(
-        grouped.get("balance_sheet", []),
+        _merge_passages_by_page(grouped.get("balance_sheet", [])),
         financials,
         evidence,
         document_id,
@@ -1185,7 +1249,6 @@ def extract_financials(
 
         f"total_assets={financials.get('total_assets')}, "
 
-        f"long_term_debt={financials.get('long_term_debt')}, "
 
         f"total_debt={financials.get('total_debt')}, "
 
