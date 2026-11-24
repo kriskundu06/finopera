@@ -168,23 +168,11 @@ def _retrieve_statement_passages(
                 scores_by_page,
                 key=lambda page: (-scores_by_page[page], page),
             )
-            # Keep all pages that contain explicit statement evidence.
-            # The old hard caps dropped valid pages (including statement
-            # totals) in longer quarterly reports. Bound only pathological PDFs.
-            page_limit = 18 if statement == "balance_sheet" else 14
+            # Keep retrieval focused: page-coherent chunks preserve every
+            # chunk on selected pages, but adjacent-page expansion caused
+            # unrelated narrative pages to flood the model context.
+            page_limit = 10 if statement == "balance_sheet" else 6
             selected_pages = set(ranked_pages[:page_limit])
-
-            # Include immediate neighbours of a strong statement page so
-            # split headings, table columns and continuation rows stay together.
-            selected_pages.update(
-                page + offset
-                for page in list(selected_pages)
-                for offset in (-1, 1)
-                if page + offset in {
-                    item.get("page") for item in document_chunks
-                    if isinstance(item.get("page"), int)
-                }
-            )
             selected = [
                 chunk for chunk in document_chunks
                 if chunk.get("page") in selected_pages
@@ -507,6 +495,10 @@ DOCUMENT EXCERPTS:
     max_attempts = 3
     fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.8-flash").strip()
     models_to_try = [GEMINI_MODEL]
+    logger.info(
+        "Financial extraction model configuration: primary=%s fallback=%s",
+        GEMINI_MODEL, fallback_model or "disabled",
+    )
     if fallback_model and fallback_model != GEMINI_MODEL:
         models_to_try.append(fallback_model)
 
