@@ -565,6 +565,7 @@ def analyze_financial_document(
         "extraction_status": extraction.get("extraction_status", "completed"),
         "statement_errors": extraction.get("statement_errors", {}),
         "verified_fields": extraction.get("verified_fields", []),
+        "field_status": extraction.get("field_status", {}),
         "financials": financials,
         "analysis": analysis,
         "evidence": extraction.get("evidence", {}),
