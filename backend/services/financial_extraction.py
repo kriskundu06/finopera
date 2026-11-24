@@ -725,7 +725,36 @@ def _extract_statement(
     context, source_map = _build_context(passages, statement)
     filing_format = _detect_filing_format(passages)
     logger.info("Detected financial filing format: %s", filing_format)
+
+    # Enable detailed, temporary diagnostics locally with
+    # FINOPERA_EXTRACTION_DEBUG=1 in the backend environment.
+    debug_extraction = os.getenv("FINOPERA_EXTRACTION_DEBUG", "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if debug_extraction:
+        logger.info(
+            "EXTRACTION DEBUG | statement=%s | filing_format=%s | "
+            "source_count=%s | context_chars=%s",
+            statement, filing_format, len(source_map), len(context),
+        )
+        for source in source_map:
+            logger.info(
+                "EXTRACTION DEBUG | source_id=%s | file=%s | page=%s | chars=%s\\n%s",
+                source["source_id"],
+                source["filename"],
+                source["page"],
+                len(source["text"]),
+                source["text"],
+            )
+
     extracted = _call_gemini(statement, context, filing_format=filing_format)
+
+    if debug_extraction:
+        logger.info(
+            "EXTRACTION DEBUG | Gemini raw response | statement=%s\\n%s",
+            statement,
+            json.dumps(extracted, ensure_ascii=False, indent=2, default=str),
+        )
 
     raw_evidence = extracted.get("evidence", {})
     if not isinstance(raw_evidence, dict):
