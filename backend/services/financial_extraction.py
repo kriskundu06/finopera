@@ -1401,13 +1401,30 @@ def _retrieve_debt_note_passages(
         item for item in candidates
         if (item.get("page"), item.get("chunk_number")) not in base_keys
     ]
-    added = added[:12]
-    combined = balance_sheet_passages + added
+    # Merge first, then admit only pages that are clearly a debt note. This
+    # excludes cash-flow "proceeds/repayments of debt" rows, which are flows,
+    # not outstanding debt balances.
+    merged_candidates = _merge_passages_by_page(added)
+    debt_note_heading = re.compile(
+        r"\\bNote\\s+\\d+\\s*[—–:-]?\\s*(?:[A-Z0-9 ]+\\s+)?DEBT\\b|"
+        r"\\b(?:Short[- ]Term Debt|Long[- ]Term Debt)\\b",
+        re.IGNORECASE,
+    )
+    debt_note_pages = [
+        item for item in merged_candidates
+        if debt_note_heading.search(str(item.get("text", "")))
+        and not re.search(
+            r"CONSOLIDATED STATEMENTS OF CASH FLOWS",
+            str(item.get("text", "")),
+            re.IGNORECASE,
+        )
+    ][:8]
+    combined = balance_sheet_passages + debt_note_pages
     logger.info(
-        "Debt-note retrieval for %s added %s passages from pages %s",
+        "Debt-note retrieval for %s added %s debt-note pages: %s",
         document_id[:12],
-        len(added),
-        sorted({item.get("page") for item in added if item.get("page") is not None}),
+        len(debt_note_pages),
+        sorted({item.get("page") for item in debt_note_pages if item.get("page") is not None}),
     )
     return _merge_passages_by_page(combined)
 
