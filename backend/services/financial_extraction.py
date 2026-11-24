@@ -364,11 +364,26 @@ def _response_schema(statement: str) -> dict[str, Any]:
 
 
 
+def _detect_filing_format(passages: list[dict[str, Any]]) -> str:
+    """Classify common filing conventions without relying on company names."""
+    text = "\n".join(str(item.get("text", "")) for item in passages).casefold()
+    india_patterns = [r"\bind\s*as\b", r"schedule\s+iii", r"(?:₹|\binr\b)",
+        r"\b(?:crores?|lakhs?|lacs?)\b", r"\b(?:q[1-4]\s*fy\s*\d{2,4}|fy\s*\d{2,4})\b",
+        r"revenue from operations", r"other equity"]
+    us_patterns = [r"form\s+10-[kq]", r"\bus\s+gaap\b", r"common stock", r"retained earnings"]
+    india_score = sum(bool(re.search(p, text)) for p in india_patterns)
+    us_score = sum(bool(re.search(p, text)) for p in us_patterns)
+    if india_score >= 2 and india_score > us_score: return "india_ind_as"
+    if us_score >= 1 and us_score > india_score: return "us_gaap_sec"
+    return "unknown"
+
 def _call_gemini(
 
     statement: str,
 
     context: str,
+
+    filing_format: str = "unknown",
 
 ) -> dict[str, Any]:
 
@@ -387,6 +402,27 @@ def _call_gemini(
 
 
     statement_rules = ""
+    if filing_format == "india_ind_as":
+        statement_rules = """
+Indian Ind AS / SEBI filing guidance:
+- Revenue from operations is revenue. Profit for the period/year or Profit
+  after tax may represent net income when it is the consolidated statement total.
+- Do not map profit before tax, total income, EBITDA, or cash-flow operating
+  profit to operating_income. Require an explicitly labelled operating line.
+- Quarterly results may show current quarter, preceding quarter, corresponding
+  prior-year quarter, current YTD, prior-year YTD, and previous-year annual
+  columns. Use the current quarter for income-statement flow fields.
+- For balance sheets, use the latest reporting-date column. Do not assume
+  first-column ordering unless the header/date establishes it.
+- Preserve INR/Rs./rupee and crore/lakh scales exactly; never convert amounts.
+- Other equity alone is not total_equity. Total liabilities is not total_debt.
+  Do not add current and non-current borrowings unless both components and
+  their common period/basis are explicitly supported.
+- Prefer consolidated statements when present; never mix standalone and
+  consolidated figures.
+- If headers do not unambiguously identify the requested period/column,
+  return null rather than guessing.
+"""
 
     if statement == "balance_sheet":
 
@@ -664,7 +700,9 @@ def _extract_statement(
         return {}, {}, []
 
     context, source_map = _build_context(passages, statement)
-    extracted = _call_gemini(statement, context)
+    filing_format = _detect_filing_format(passages)
+    logger.info("Detected financial filing format: %s", filing_format)
+    extracted = _call_gemini(statement, context, filing_format=filing_format)
 
     raw_evidence = extracted.get("evidence", {})
     if not isinstance(raw_evidence, dict):
