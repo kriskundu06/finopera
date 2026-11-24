@@ -248,7 +248,7 @@ def _merge_passages_by_page(
             "page": page,
             "document_id": page_chunks[0].get("document_id"),
             "chunk_number": 1,
-            "text": "\\n".join(
+            "text": "\n".join(
                 str(item.get("text", "")).strip()
                 for item in page_chunks
                 if str(item.get("text", "")).strip()
@@ -931,7 +931,7 @@ def _apply_statement_row_fallback(
                 min(next_label_positions) if next_label_positions else len(text)
             )
             row_text = text[label_match.end():label_match.end() + nearest_next_label]
-            if len(row_text) > 160 or not re.search(r"\\d", row_text):
+            if len(row_text) > 160 or not re.search(r"\d", row_text):
                 continue
 
             # Multiple comparative amounts are accepted only because the
