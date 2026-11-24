@@ -36,7 +36,6 @@ import {
   Menu,
 
   Send,
-  Settings,
 
   Bot,
 
@@ -61,7 +60,6 @@ const navigation = [
   { label: 'Documents', page: 'Documents', icon: FileText },
   { label: 'AI Analyst', page: 'Ask AI', icon: Bot },
   { label: 'Financial Statements', page: 'Financial analysis', icon: ChartNoAxesCombined },
-  { label: 'Settings', page: 'Settings', icon: Settings },
 ]
 
 const metrics = [
