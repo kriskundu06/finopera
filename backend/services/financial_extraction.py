@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 MAX_CHARS_PER_PASSAGE = 6000
 
@@ -168,8 +168,23 @@ def _retrieve_statement_passages(
                 scores_by_page,
                 key=lambda page: (-scores_by_page[page], page),
             )
-            page_limit = 10 if statement == "balance_sheet" else 6
+            # Keep all pages that contain explicit statement evidence.
+            # The old hard caps dropped valid pages (including statement
+            # totals) in longer quarterly reports. Bound only pathological PDFs.
+            page_limit = 18 if statement == "balance_sheet" else 14
             selected_pages = set(ranked_pages[:page_limit])
+
+            # Include immediate neighbours of a strong statement page so
+            # split headings, table columns and continuation rows stay together.
+            selected_pages.update(
+                page + offset
+                for page in list(selected_pages)
+                for offset in (-1, 1)
+                if page + offset in {
+                    item.get("page") for item in document_chunks
+                    if isinstance(item.get("page"), int)
+                }
+            )
             selected = [
                 chunk for chunk in document_chunks
                 if chunk.get("page") in selected_pages
@@ -744,7 +759,17 @@ def _extract_statement(
         )
 
         # A value without a valid source and matching quote is not returned.
-        if value is not None and source_id in valid_source_ids and quote_is_grounded:
+        value_is_supported = (
+            field not in NUMERIC_FIELDS
+            or _quote_contains_value(raw_value, quote)
+        )
+
+        if (
+            value is not None
+            and source_id in valid_source_ids
+            and quote_is_grounded
+            and value_is_supported
+        ):
             values[field] = value
             evidence[field] = {
                 "source_id": source_id,
