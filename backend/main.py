@@ -185,7 +185,20 @@ async def extract_pdf(file: UploadFile = File(...)):
             ocr_pages = []
             ocr_skipped_pages = []
 
+            page_image_dir = (
+                Path(__file__).resolve().parent.parent
+                / "data" / "document_pages" / document_id
+            )
+            page_image_dir.mkdir(parents=True, exist_ok=True)
+
             for page_number, page in enumerate(pdf, start=1):
+                # Persist a 150-DPI page image so visual-table evidence can be
+                # inspected later. Keep the original PDF as the source of truth.
+                image_path = page_image_dir / f"page_{page_number}.png"
+                if not image_path.is_file():
+                    pixmap = page.get_pixmap(matrix=pymupdf.Matrix(150 / 72, 150 / 72), alpha=False)
+                    pixmap.save(image_path)
+
                 page_text = page.get_text("text").strip()
 
                 # Financial tables are often embedded as page images. PyMuPDF's
