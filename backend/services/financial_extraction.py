@@ -426,7 +426,7 @@ Indian Ind AS / SEBI filing guidance:
 
     if statement == "balance_sheet":
 
-        statement_rules = """
+        statement_rules += """
 
 For the balance sheet:
 
