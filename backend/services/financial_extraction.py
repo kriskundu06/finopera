@@ -150,7 +150,7 @@ def _retrieve_statement_passages(
                     continue
                 chunk_text = str(chunk.get("text", ""))
                 score = _statement_relevance_score(chunk_text, statement)
-                lowered = re.sub(r"\\s+", " ", chunk_text.casefold())
+                lowered = re.sub(r"\s+", " ", chunk_text.casefold())
                 if statement == "balance_sheet":
                     if "consolidated balance sheet" in lowered:
                         score += 12
