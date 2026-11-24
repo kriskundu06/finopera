@@ -169,10 +169,10 @@ def _retrieve_statement_passages(
                     chunk.get("chunk_number") if isinstance(chunk.get("chunk_number"), int) else 0,
                 )
             )
-            # Keep all chunks from the chosen statement pages, with a generous
-            # safety cap to prevent unrelated long reports exhausting context.
-            passage_limit = 40 if statement == "balance_sheet" else 24
-            grouped[statement] = selected[:passage_limit]
+            # Keep every chunk from the selected pages. Truncating this
+            # list can remove the numeric half of a table or the bottom rows
+            # (especially net income and balance-sheet totals).
+            grouped[statement] = selected
             logger.info(
                 "Selected %s page-coherent %s passages across %s ranked pages "
                 "from %s document chunks",
@@ -291,15 +291,10 @@ def _build_context(
 
 
 
-        excerpt_limit = (
-
-            MAX_CHARS_PER_PASSAGE
-
-            if statement == "balance_sheet"
-
-            else 1800
-
-        )
+        # Page-merged statement tables can be much longer than a single
+        # 1,800-character chunk. Preserve the complete table and its lower
+        # rows so net income and balance-sheet totals are not cut off.
+        excerpt_limit = 16000 if statement == "balance_sheet" else 12000
 
         excerpt = raw_text[:excerpt_limit]
 
