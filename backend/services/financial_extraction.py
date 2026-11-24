@@ -351,12 +351,21 @@ def _response_schema(statement: str) -> dict[str, Any]:
     schema = {field: None for field in STATEMENT_FIELDS[statement]}
 
     schema["evidence"] = {
-
         field: {"source_id": None, "quote": None}
-
         for field in STATEMENT_FIELDS[statement]
-
     }
+
+    if statement == "balance_sheet":
+        component_names = (
+            "short_term_debt",
+            "current_portion_long_term_debt",
+            "long_term_debt",
+        )
+        schema["debt_components"] = {
+            name: {"value": None, "source_id": None, "quote": None}
+            for name in component_names
+        }
+        schema["debt_components_complete"] = false
 
     return schema
 
@@ -440,8 +449,21 @@ For the balance sheet:
   sheet.
 - current_assets and current_liabilities must come from their explicitly
   labelled total rows on that same consolidated balance sheet.
-- total_debt must be explicitly labelled "Total debt" or "Total borrowings".
-  Do not treat total liabilities or lease liabilities as total debt.
+- If no explicit total debt row exists, identify the separately reported
+  interest-bearing debt components in the balance sheet: short-term debt,
+  current maturities/current portion of long-term debt, and long-term debt.
+- Return each component in debt_components with its numeric value, source_id,
+  and an exact supporting quote. Return null for a component not explicitly
+  reported in the supplied excerpts.
+- Set debt_components_complete=true only when the supplied balance-sheet
+  excerpts show the complete set of interest-bearing debt components for the
+  selected consolidated reporting date. Never infer that an omitted component
+  is zero merely because it is absent from the excerpt.
+- Exclude operating lease liabilities, accounts payable, accrued expenses,
+  pension liabilities, and total liabilities unless the filing explicitly
+  classifies an item as interest-bearing debt.
+- Do not double-count current maturities when they are already included in
+  the reported long-term debt amount.
 - Use the latest reporting-date column and preserve its period/basis.
 - Table labels and their numeric columns may appear in separate text blocks
   within the same page. Read the entire page and align rows with columns
@@ -712,6 +734,56 @@ def _extract_statement(
     evidence: dict[str, Any] = {}
     rejection_reasons: dict[str, str] = {}
     valid_source_ids = {item["source_id"] for item in source_map}
+
+    # Keep validated debt components internal until the document-level
+    # calculation can confirm completeness and avoid double counting.
+    if statement == "balance_sheet":
+        raw_components = extracted.get("debt_components", {})
+        if not isinstance(raw_components, dict):
+            raw_components = {}
+        validated_components = {}
+        for component_name in (
+            "short_term_debt",
+            "current_portion_long_term_debt",
+            "long_term_debt",
+        ):
+            raw_component = raw_components.get(component_name)
+            if not isinstance(raw_component, dict):
+                continue
+            component_value = raw_component.get("value")
+            component_source_id = raw_component.get("source_id")
+            component_quote = raw_component.get("quote")
+            component_source = next(
+                (item for item in source_map
+                 if item["source_id"] == component_source_id),
+                None,
+            )
+            valid_component_value = (
+                isinstance(component_value, (int, float))
+                and not isinstance(component_value, bool)
+                and math.isfinite(float(component_value))
+            )
+            valid_component_quote = (
+                isinstance(component_quote, str)
+                and bool(component_quote.strip())
+                and component_source is not None
+                and _normalize_text(component_quote)
+                    in _normalize_text(component_source["text"])
+                and _quote_contains_value(component_value, component_quote)
+            )
+            if valid_component_value and valid_component_quote:
+                validated_components[component_name] = {
+                    "value": component_value,
+                    "source_id": component_source_id,
+                    "filename": component_source["filename"],
+                    "page": component_source["page"],
+                    "quote": component_quote.strip(),
+                    "type": "source_quote",
+                }
+        values["_validated_debt_components"] = validated_components
+        values["_debt_components_complete"] = (
+            extracted.get("debt_components_complete") is True
+        )
 
     for field in STATEMENT_FIELDS[statement]:
         raw_value = extracted.get(field)
@@ -1220,8 +1292,13 @@ def extract_financials(
                 evidence[field] = None
             continue
 
+        debt_components = values.pop("_validated_debt_components", {})
+        debt_components_complete = values.pop("_debt_components_complete", False)
         financials.update(values)
         evidence.update(field_evidence)
+        if statement == "balance_sheet":
+            financials["_debt_components"] = debt_components
+            financials["_debt_components_complete"] = debt_components_complete
         all_sources.extend(source_map)
 
 
@@ -1279,6 +1356,31 @@ def extract_financials(
         )
 
 
+
+    # Calculate total debt only when Gemini confirms the supplied balance-sheet
+    # excerpts contain the complete component set and every included amount
+    # has independently passed source-quote validation.
+    debt_components = financials.pop("_debt_components", {})
+    debt_components_complete = financials.pop("_debt_components_complete", False)
+    if (
+        financials.get("total_debt") is None
+        and debt_components_complete
+        and isinstance(debt_components, dict)
+        and debt_components
+    ):
+        component_total = sum(
+            float(item["value"]) for item in debt_components.values()
+        )
+        if math.isfinite(component_total):
+            financials["total_debt"] = component_total
+            evidence["total_debt"] = {
+                "type": "calculated",
+                "formula": "sum of verified interest-bearing debt components",
+                "value": component_total,
+                "inputs": debt_components,
+                "component_count": len(debt_components),
+                "components_complete": True,
+            }
 
     revenue = financials.get("revenue")
 
