@@ -126,11 +126,6 @@ Never commit `.env` or publish API keys. The `.env.example` file should contain 
 - Risk indicators are preliminary screening aids, not investment advice or a substitute for professional financial due diligence.
 - Deployment and end-to-end validation should be confirmed before treating the application as production-ready.
 
-## Roadmap
-
-- Improve extraction reliability and handling of API errors.
-- Expand automated tests and financial-data validation.
-- Improve document-level source isolation and evidence traceability.
 
 ## Disclaimer
 
