@@ -1340,6 +1340,78 @@ def _apply_balance_sheet_fallback(
     # automatically equivalent to borrowings.
 
 
+def _retrieve_debt_note_passages(
+    document_id: str,
+    balance_sheet_passages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Retrieve debt-note disclosures from this document only.
+
+    The balance sheet often presents long-term debt while short-term debt or
+    current maturities are disclosed in a separate note. Keep this retrieval
+    isolated from ordinary statement extraction so other fields are unchanged.
+    """
+    candidates = list(balance_sheet_passages)
+    seen = {
+        (item.get("document_id"), item.get("page"), item.get("chunk_number"))
+        for item in candidates
+    }
+    queries = (
+        "debt note short-term debt commercial paper outstanding current portion "
+        "of long-term debt current maturities",
+        "borrowings notes payable credit facilities outstanding debt balance "
+        "sheet current and long term",
+        "long-term debt maturities current portion accrued expenses other "
+        "current liabilities debt",
+    )
+    debt_terms = re.compile(
+        r"\\b(debt|borrowings|commercial paper|credit facilit(?:y|ies)|"
+        r"notes payable|current maturit(?:y|ies)|short[- ]term borrowing|"
+        r"long[- ]term borrowing)\\b",
+        re.IGNORECASE,
+    )
+    for query in queries:
+        try:
+            results = search_chunks(
+                query=query,
+                top_k=8,
+                document_id=document_id,
+            )
+        except Exception:
+            logger.exception("Debt-note retrieval failed for document %s", document_id[:12])
+            continue
+        for item in results:
+            if item.get("document_id") != document_id:
+                continue
+            text = str(item.get("text", ""))
+            if not text.strip() or not debt_terms.search(text):
+                continue
+            key = (item.get("document_id"), item.get("page"), item.get("chunk_number"))
+            if key not in seen:
+                candidates.append(item)
+                seen.add(key)
+
+    # Preserve all balance-sheet pages and add a small, document-scoped set of
+    # debt-note pages. The dedicated extraction below consumes this context;
+    # it does not alter the other financial fields.
+    base_keys = {
+        (item.get("page"), item.get("chunk_number"))
+        for item in balance_sheet_passages
+    }
+    added = [
+        item for item in candidates
+        if (item.get("page"), item.get("chunk_number")) not in base_keys
+    ]
+    added = added[:12]
+    combined = balance_sheet_passages + added
+    logger.info(
+        "Debt-note retrieval for %s added %s passages from pages %s",
+        document_id[:12],
+        len(added),
+        sorted({item.get("page") for item in added if item.get("page") is not None}),
+    )
+    return _merge_passages_by_page(combined)
+
+
 def _calculate_total_debt(
     components: dict[str, dict[str, Any]],
     components_complete: bool,
@@ -1548,11 +1620,40 @@ def extract_financials(
 
 
 
-    # Calculate total debt only when Gemini confirms the supplied balance-sheet
-    # excerpts contain the complete component set and every included amount
-    # has independently passed source-quote validation.
+    # Debt notes are frequently outside the balance-sheet pages selected for
+    # ordinary extraction. Run a debt-only, document-scoped retrieval pass;
+    # do not feed these extra passages into revenue/assets/equity extraction.
     debt_components = financials.pop("_debt_components", {})
     debt_components_complete = financials.pop("_debt_components_complete", False)
+    if financials.get("total_debt") is None and not debt_components_complete:
+        try:
+            debt_passages = _retrieve_debt_note_passages(
+                document_id,
+                _merge_passages_by_page(grouped.get("balance_sheet", [])),
+            )
+            if debt_passages:
+                debt_values, _, _, _ = _extract_statement(
+                    "balance_sheet",
+                    debt_passages,
+                )
+                retrieved_components = debt_values.get(
+                    "_validated_debt_components", {}
+                )
+                if retrieved_components:
+                    debt_components = retrieved_components
+                debt_components_complete = (
+                    debt_values.get("_debt_components_complete") is True
+                )
+        except Exception:
+            # Debt enrichment is intentionally isolated: a retrieval/model
+            # failure must not affect any other extracted financial field.
+            logger.exception(
+                "Debt-only enrichment failed for document %s; retaining other results",
+                document_id[:12],
+            )
+
+    # Calculate total debt only when the model confirms complete component
+    # coverage and each amount has an exact quote in this same document.
     if financials.get("total_debt") is None:
         component_total, calculated_debt_evidence = _calculate_total_debt(
             debt_components, debt_components_complete
