@@ -1406,7 +1406,7 @@ def _retrieve_debt_note_passages(
     # not outstanding debt balances.
     merged_candidates = _merge_passages_by_page(added)
     debt_note_heading = re.compile(
-        r"\\bNote\\s+\\d+\\s*[—–:-]?\\s*(?:[A-Z0-9 ]+\\s+)?DEBT\\b|"
+        r"\\bNote\\s+\\d+\\s*[. —–:-]*\\bDEBT\\b|"
         r"\\b(?:Short[- ]Term Debt|Long[- ]Term Debt)\\b",
         re.IGNORECASE,
     )
