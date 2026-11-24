@@ -1364,9 +1364,9 @@ def _retrieve_debt_note_passages(
         "current liabilities debt",
     )
     debt_terms = re.compile(
-        r"\\b(debt|borrowings|commercial paper|credit facilit(?:y|ies)|"
+        r"\b(debt|borrowings|commercial paper|credit facilit(?:y|ies)|"
         r"notes payable|current maturit(?:y|ies)|short[- ]term borrowing|"
-        r"long[- ]term borrowing)\\b",
+        r"long[- ]term borrowing)\b",
         re.IGNORECASE,
     )
     for query in queries:
@@ -1406,8 +1406,8 @@ def _retrieve_debt_note_passages(
     # not outstanding debt balances.
     merged_candidates = _merge_passages_by_page(added)
     debt_note_heading = re.compile(
-        r"\\bNote\\s+\\d+\\s*[. —–:-]*\\bDEBT\\b|"
-        r"\\b(?:Short[- ]Term Debt|Long[- ]Term Debt)\\b",
+        r"\bNote\s+\d+\s*[. —–:-]*\bDEBT\b|"
+        r"\b(?:Short[- ]Term Debt|Long[- ]Term Debt)\b",
         re.IGNORECASE,
     )
     debt_note_pages = [
