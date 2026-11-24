@@ -631,7 +631,7 @@ def _quote_contains_value(value: Any, quote: Any) -> bool:
         return False
     if not isinstance(quote, str) or not quote.strip():
         return False
-    numeric_tokens = re.findall(r"(?<![\\w.])\\(?-?\\d[\\d,]*(?:\\.\\d+)?\\)?", quote)
+    numeric_tokens = re.findall(r"(?<![\w.])\(?-?\d[\d,]*(?:\.\d+)?\)?", quote)
     try:
         expected = float(value)
     except (TypeError, ValueError):
