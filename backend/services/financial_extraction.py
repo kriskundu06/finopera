@@ -728,32 +728,43 @@ def _extract_statement(
 
     # Enable detailed, temporary diagnostics locally with
     # FINOPERA_EXTRACTION_DEBUG=1 in the backend environment.
+    # Use print() here because application logging configuration may suppress INFO.
     debug_extraction = os.getenv("FINOPERA_EXTRACTION_DEBUG", "").strip().lower() in {
         "1", "true", "yes", "on"
     }
     if debug_extraction:
-        logger.info(
-            "EXTRACTION DEBUG | statement=%s | filing_format=%s | "
-            "source_count=%s | context_chars=%s",
-            statement, filing_format, len(source_map), len(context),
+        print(
+            f"\\n========== FINOPERA EXTRACTION DEBUG: {statement} "
+            f"(format={filing_format}) ==========",
+            flush=True,
+        )
+        print(
+            f"SOURCES: {len(source_map)} | CONTEXT CHARS: {len(context)}",
+            flush=True,
         )
         for source in source_map:
-            logger.info(
-                "EXTRACTION DEBUG | source_id=%s | file=%s | page=%s | chars=%s\\n%s",
-                source["source_id"],
-                source["filename"],
-                source["page"],
-                len(source["text"]),
-                source["text"],
+            print(
+                f"\\n--- SOURCE {source['source_id']} | "
+                f"FILE: {source['filename']} | PAGE: {source['page']} | "
+                f"CHARS: {len(source['text'])} ---",
+                flush=True,
             )
+            print(source["text"], flush=True)
 
     extracted = _call_gemini(statement, context, filing_format=filing_format)
 
     if debug_extraction:
-        logger.info(
-            "EXTRACTION DEBUG | Gemini raw response | statement=%s\\n%s",
-            statement,
+        print(
+            f"\\n--- GEMINI RAW RESPONSE: {statement} ---",
+            flush=True,
+        )
+        print(
             json.dumps(extracted, ensure_ascii=False, indent=2, default=str),
+            flush=True,
+        )
+        print(
+            f"========== END FINOPERA EXTRACTION DEBUG: {statement} ==========\\n",
+            flush=True,
         )
 
     raw_evidence = extracted.get("evidence", {})
