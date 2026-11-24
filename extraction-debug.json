@@ -1,0 +1,131 @@
+{
+    "document_id":  "b423551c28fa30d1dc8e0f307a044fa5f1200f0b87fe0bec44ab13fe3d00e2a9",
+    "financials":  {
+                       "revenue":  24138,
+                       "operating_income":  null,
+                       "net_income":  125,
+                       "current_assets":  null,
+                       "current_liabilities":  null,
+                       "total_debt":  null,
+                       "total_equity":  null,
+                       "total_assets":  null,
+                       "currency":  "INR",
+                       "units":  "crores",
+                       "reporting_period":  null
+                   },
+    "evidence":  {
+                     "revenue":  {
+                                     "source_id":  "S3",
+                                     "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                                     "page":  21,
+                                     "quote":  "Revenue from operations\n24,138",
+                                     "type":  "source_quote"
+                                 },
+                     "operating_income":  null,
+                     "net_income":  {
+                                        "source_id":  "S3",
+                                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                                        "page":  21,
+                                        "quote":  "Profit for the period / year attributable to:\nOwners of the Parent\n125",
+                                        "type":  "source_quote"
+                                    },
+                     "current_assets":  null,
+                     "current_liabilities":  null,
+                     "total_debt":  null,
+                     "total_equity":  null,
+                     "total_assets":  null,
+                     "currency":  {
+                                      "source_id":  "S3",
+                                      "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                                      "page":  21,
+                                      "quote":  "(INR crore)",
+                                      "type":  "source_quote"
+                                  },
+                     "units":  {
+                                   "source_id":  "S3",
+                                   "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                                   "page":  21,
+                                   "quote":  "(INR crore)",
+                                   "type":  "source_quote"
+                               },
+                     "reporting_period":  null
+                 },
+    "verified_fields":  [
+                            "net_income",
+                            "revenue"
+                        ],
+    "missing_fields":  [
+                           "current_assets",
+                           "current_liabilities",
+                           "operating_income",
+                           "total_assets",
+                           "total_debt",
+                           "total_equity"
+                       ],
+    "extraction_status":  "partial",
+    "message":  "Extraction partially completed: 2 of 8 core financial fields were verified. Missing or unverified fields: current_assets, current_liabilities, operating_income, total_assets, total_debt, total_equity. Review the original statements before relying on this analysis.",
+    "currency":  "INR",
+    "units":  "crores",
+    "reporting_period":  null,
+    "sources":  [
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  3
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  7
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  21
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  29
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  32
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  35
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  11
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  12
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  22
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  27
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  30
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  31
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  37
+                    },
+                    {
+                        "filename":  "Eternal_Limited_Shareholders_Letter_Q2FY27_Results.pdf",
+                        "page":  38
+                    }
+                ],
+    "statement_errors":  {
+
+                         }
+}

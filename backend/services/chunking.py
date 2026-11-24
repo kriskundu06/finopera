@@ -11,7 +11,6 @@ def _split_long_line(line: str, max_length: int) -> list[str]:
     current = ""
 
     for word in words:
-        # A single token may itself exceed the limit (e.g. OCR artefacts).
         if len(word) > max_length:
             if current:
                 parts.append(current)
@@ -60,12 +59,9 @@ def _page_chunks(text: str, chunk_size: int, overlap: int) -> list[str]:
         if current:
             chunks.append(current)
 
-        # Retain a small text overlap for context across chunk boundaries.
         prefix = current[-overlap:] if overlap and current else ""
         current = f"{prefix}\n{line}".strip() if prefix else line
 
-        # A carry-over prefix plus a line can exceed the limit. Trim only the
-        # prefix so the complete current line remains intact.
         if len(current) > chunk_size:
             current = line
 
@@ -85,8 +81,8 @@ def chunk_pages(
     """Split PDF pages into line-aware chunks with stable document identity.
 
     Page boundaries are preserved so every indexed passage retains the
-    correct PDF page reference. Table rows stay intact unless a single row
-    exceeds the configured chunk size.
+    correct PDF page reference. Stores both overlapped text (for vector search)
+    and clean non-overlapping text / full_page_text (for exact page reconstruction).
     """
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive.")
@@ -110,9 +106,15 @@ def chunk_pages(
         if not text.strip():
             continue
 
-        page_chunks = _page_chunks(text, chunk_size, overlap)
+        clean_chunks = _page_chunks(text, chunk_size, overlap=0)
+        overlapped_chunks = _page_chunks(text, chunk_size, overlap=overlap)
 
-        for chunk_number, chunk_text in enumerate(page_chunks, start=1):
+        for chunk_number, chunk_text in enumerate(overlapped_chunks, start=1):
+            clean_text = (
+                clean_chunks[chunk_number - 1]
+                if chunk_number <= len(clean_chunks)
+                else chunk_text
+            )
             chunks.append({
                 "chunk_id": (
                     f"{document_id}::page_{page_number}::chunk_{chunk_number}"
@@ -123,6 +125,8 @@ def chunk_pages(
                     "document_id": document_id,
                     "page": page_number,
                     "chunk_number": chunk_number,
+                    "clean_text": clean_text,
+                    "full_page_text": text.strip(),
                 },
             })
 
