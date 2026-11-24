@@ -1620,9 +1620,9 @@ def extract_financials(
     ]
     metadata_text = "\n".join(str(item.get("text", "")) for item in metadata_passages)
 
-    if not financials.get("currency") and re.search(r"\\$\\s*\\d|\\bUSD\\b", metadata_text, re.IGNORECASE):
+    if not financials.get("currency") and re.search(r"\$\s*\d|\bUSD\b", metadata_text, re.IGNORECASE):
         financials["currency"] = "USD"
-        metadata_source = next((item for item in metadata_passages if re.search(r"\\$\\s*\\d|\\bUSD\\b", str(item.get("text", "")), re.IGNORECASE)), None)
+        metadata_source = next((item for item in metadata_passages if re.search(r"\$\s*\d|\bUSD\b", str(item.get("text", "")), re.IGNORECASE)), None)
         if metadata_source:
             evidence["currency"] = {
                 "filename": metadata_source.get("source", "unknown"),
@@ -1632,17 +1632,20 @@ def extract_financials(
             }
 
     if not financials.get("reporting_period"):
+        # SEC comparative headers often print the month/day once and then
+        # list two years on separate lines (e.g. September 30, 2025 / 2026).
         period_match = re.search(
-            r"(Three|Six|Nine|Twelve) Months Ended\\s+"
-            r"(January|February|March|April|May|June|July|August|September|October|November|December)\\s+"
-            r"(\\d{1,2}),?\\s+(\\d{4})",
+            r"(Three|Six|Nine|Twelve) Months Ended\s+"
+            r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+"
+            r"(\d{1,2}),?\s*(\d{4})(?:\s+(\d{4}))?",
             metadata_text,
             re.IGNORECASE,
         )
         if period_match:
+            latest_year = period_match.group(5) or period_match.group(4)
             financials["reporting_period"] = (
                 f"{period_match.group(1)} Months Ended {period_match.group(2)} "
-                f"{period_match.group(3)}, {period_match.group(4)}"
+                f"{period_match.group(3)}, {latest_year}"
             )
             metadata_source = next((item for item in metadata_passages if period_match.group(0) in str(item.get("text", ""))), None)
             if metadata_source:
