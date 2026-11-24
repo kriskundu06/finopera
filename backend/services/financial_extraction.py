@@ -148,10 +148,20 @@ def _retrieve_statement_passages(
                 page = chunk.get("page")
                 if not isinstance(page, int):
                     continue
-                score = _statement_relevance_score(
-                    str(chunk.get("text", "")), statement
-                )
-                if score:
+                chunk_text = str(chunk.get("text", ""))
+                score = _statement_relevance_score(chunk_text, statement)
+                lowered = re.sub(r"\\s+", " ", chunk_text.casefold())
+                if statement == "balance_sheet":
+                    if "consolidated balance sheet" in lowered:
+                        score += 12
+                    if "standalone balance sheet" in lowered:
+                        score -= 8
+                elif statement == "income_statement":
+                    if "consolidated statement of profit and loss" in lowered:
+                        score += 12
+                    if "standalone statement of profit and loss" in lowered:
+                        score -= 8
+                if score > 0:
                     scores_by_page[page] = max(scores_by_page.get(page, 0), score)
             ranked_pages = sorted(
                 scores_by_page,
