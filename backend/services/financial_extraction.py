@@ -6,6 +6,7 @@ import re
 import time
 from typing import Any
 from pathlib import Path
+from datetime import datetime
 from dotenv import load_dotenv
 from google import genai
 from backend.services.vector_store import get_document_chunks, search_chunks
@@ -510,8 +511,10 @@ Rules:
 
 - Capital expenditure must be a positive amount representing cash spent.
 
-- For each non-null value, provide a short exact quote and its source_id.
-
+- For each non-null value, provide an exact, contiguous quote copied from the
+  supplied excerpt and its source_id. Do not rewrite table rows or insert separators.
+- When a table row has multiple comparative amounts, include the intervening
+  amounts exactly as they appear in the source; do not omit earlier columns.
 - The quote must include enough source text to support the reported value.
 
 - Source IDs must match the labels shown in the excerpts.
@@ -1109,6 +1112,34 @@ def _find_current_debt_portion(
     return None
 
 
+def _latest_column_index(text: str, amount_count: int) -> int | None:
+    """Return the column index associated with the latest explicit date.
+
+    This is deliberately conservative: only map columns when the number of
+    explicit month-name dates matches the number of row amounts.
+    """
+    date_pattern = re.compile(
+        r"\\b(January|February|March|April|May|June|July|August|"
+        r"September|October|November|December)\\s+"
+        r"(\\d{1,2}),?\\s+(\\d{4})\\b",
+        flags=re.IGNORECASE,
+    )
+    dates = []
+    for match in date_pattern.finditer(text):
+        try:
+            parsed = datetime.strptime(
+                f"{match.group(1)} {match.group(2)} {match.group(3)}",
+                "%B %d %Y",
+            )
+        except ValueError:
+            continue
+        dates.append((parsed, len(dates)))
+
+    if len(dates) != amount_count or not dates:
+        return None
+    return max(dates, key=lambda item: item[0])[1]
+
+
 def _apply_statement_row_fallback(
     passages: list[dict[str, Any]],
     financials: dict[str, Any],
@@ -1164,9 +1195,17 @@ def _apply_statement_row_fallback(
             if len(row_text) > 160 or not re.search(r"\d", row_text):
                 continue
 
-            # Multiple comparative amounts are accepted only because the
-            # table header in this same passage establishes latest-first order.
-            value = amounts[0]
+            # Select the amount whose column is tied to the latest explicit
+            # reporting date. Never assume the first PDF column is the latest.
+            column_index = _latest_column_index(text, len(amounts))
+            if column_index is not None:
+                value = amounts[column_index]
+            elif len(amounts) == 1:
+                value = amounts[0]
+            else:
+                # Comparative values without a one-to-one date mapping are
+                # ambiguous; leave them unavailable rather than guessing.
+                continue
             financials[field] = value
             evidence[field] = {
                 "filename": str(passage.get("source", "unknown")),
