@@ -1,4 +1,5 @@
 import json
+import math
 import logging
 import os
 import re
@@ -365,7 +366,7 @@ def _response_schema(statement: str) -> dict[str, Any]:
             name: {"value": None, "source_id": None, "quote": None}
             for name in component_names
         }
-        schema["debt_components_complete"] = false
+        schema["debt_components_complete"] = False
 
     return schema
 
